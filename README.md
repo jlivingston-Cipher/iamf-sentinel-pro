@@ -44,6 +44,16 @@ cmake -S sentinel-dsp -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build
 Every change to either measurement implementation is gated by the differential suite
 (`sentinel-dsp/tests/differential.py` + `tests/test_dsp_backend.py`).
 
+**Verified platforms.** Every push runs the Pro test suite on **Linux, macOS, and Windows**
+against **Python 3.11 and 3.12** — [`ci.yml`](.github/workflows/ci.yml) is the claim; the matrix
+is the evidence. That matrix covers the **Python** side of Pro; the C++ kernel and its
+differential against `dsp.py` are gated separately, on Linux only, by
+[`dsp-differential.yml`](.github/workflows/dsp-differential.yml) — a green matrix here says
+nothing about the kernel, and vice versa. Oracle-gated, sample-gated and kernel-gated tests
+skip in that environment by design, and on Windows so do the tests that depend on POSIX
+executable semantics (shell stubs, `PATH` resolution of extensionless files). Nothing is
+claimed for a platform that does not have a green leg.
+
 L3 and adm-compare additionally need the reference toolchain (decoder_main / iamfdec) and,
 for adm-compare, EAR (`ear-render`). The OCI recipes under `oci/` package the toolchain
 reproducibly; `oci/layer-scan.py` is the release-CI hygiene check.

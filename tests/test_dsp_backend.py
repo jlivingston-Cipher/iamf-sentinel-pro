@@ -16,6 +16,9 @@ import sys
 
 import pytest
 
+from conftest import (needs_posix_shell,      # noqa: E402
+                      needs_windows_pathext)
+
 np = pytest.importorskip("numpy")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -92,6 +95,7 @@ def test_discovery_bad_explicit_path_raises(monkeypatch, tmp_path):
         dsp.kernel_path()
 
 
+@needs_windows_pathext
 def test_discovery_path_fallback(monkeypatch, tmp_path):
     stub = tmp_path / "sentinel-dsp"
     stub.write_text("#!/bin/sh\nexit 0\n")
@@ -129,6 +133,7 @@ def test_forced_kernel_without_binary_raises(monkeypatch, stereo_wav, tmp_path):
         dsp.analyze(stereo_wav, layout="2.0", backend="kernel")
 
 
+@needs_posix_shell
 def test_broken_kernel_is_error_not_fallback(monkeypatch, stereo_wav, tmp_path):
     """D-S3: present-but-failing kernel never silently downgrades to numpy."""
     stub = tmp_path / "sentinel-dsp"
@@ -139,6 +144,7 @@ def test_broken_kernel_is_error_not_fallback(monkeypatch, stereo_wav, tmp_path):
         dsp.analyze(stereo_wav, layout="2.0")
 
 
+@needs_posix_shell
 def test_kernel_invalid_json_is_error(monkeypatch, stereo_wav, tmp_path):
     stub = tmp_path / "sentinel-dsp"
     stub.write_text("#!/bin/sh\necho 'not json'\nexit 0\n")
@@ -148,6 +154,7 @@ def test_kernel_invalid_json_is_error(monkeypatch, stereo_wav, tmp_path):
         dsp.analyze(stereo_wav, layout="2.0")
 
 
+@needs_posix_shell
 def test_kernel_missing_fields_is_error(monkeypatch, stereo_wav, tmp_path):
     stub = tmp_path / "sentinel-dsp"
     stub.write_text("#!/bin/sh\necho '{\"sample_rate\": 48000}'\nexit 0\n")

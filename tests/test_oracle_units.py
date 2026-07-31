@@ -9,14 +9,17 @@ from __future__ import annotations
 import os
 import sys
 
+import pytest
+
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from sentinel_pro.oracle import (SOUND_SYSTEM_TO_LAYOUT, DecodeResult,  # noqa: E402
                                  Toolchain)
 
-_OSS = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..",
-                                    "sentinel-oss"))
-sys.path.insert(0, _OSS)
+from conftest import NO_OSS_SRC_REASON, OSS_SRC        # noqa: E402
+
+if OSS_SRC is None:                                   # pragma: no cover
+    pytest.skip(NO_OSS_SRC_REASON, allow_module_level=True)
 from fixtures.build import build, channel_spec        # noqa: E402
 from fixtures.mp4wrap import wrap_mp4                 # noqa: E402
 

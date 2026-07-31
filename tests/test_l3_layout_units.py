@@ -9,12 +9,15 @@ from __future__ import annotations
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from sentinel_pro.l3_rendered import _native_analysis_layout   # noqa: E402
 
-_OSS = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..",
-                                    "sentinel-oss"))
-sys.path.insert(0, _OSS)
+from conftest import OSS_SRC, NO_OSS_SRC_REASON                 # noqa: E402
+
+if OSS_SRC is None:                                            # pragma: no cover
+    pytest.skip(NO_OSS_SRC_REASON, allow_module_level=True)
 from sentinel.parser import parse_bytes                        # noqa: E402
 from fixtures.build import build, channel_spec, scene_spec     # noqa: E402
 

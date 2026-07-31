@@ -1,0 +1,61 @@
+# iamf-sentinel-pro CI — 3-OS × 2-Python matrix (doc 88 Tier B, item 24, doc 97).
+#
+# Companion to `dsp-differential.yml`, which is a different claim: that job
+# builds the C++ kernel and gates it against dsp.py on ubuntu only. This one
+# says the *Python* side of Pro runs on three platforms. Neither implies the
+# other, and README.md must not blur them.
+#
+# Why two checkouts. The suite's fixture builders (`fixtures/build.py`,
+# `fixtures/mp4wrap.py`) ship in the iamf-sentinel SOURCE tree, not in the
+# installed wheel, and two modules here build real IAMF bytes with them. The
+# sibling checkout supplies them; `tests/conftest.py` finds it by name
+# (`iamf-sentinel/`, `sentinel-oss/`, or `$IAMF_SENTINEL_SRC`) and skips those
+# two modules cleanly when none is present. Note the side effect, which is
+# intentional: the source checkout precedes the installed wheel on sys.path,
+# so this matrix exercises Pro against the core's current `main` — an
+# early-warning signal, not a released-wheel compatibility test.
+#
+# Provenance note (doc 97 §4). The Linux leg below was executed verbatim in
+# the doc-97 session: 58 passed / 15 skipped / 0 failed in the two-checkout
+# layout, byte-for-byte the invocation in this file. The macOS and Windows
+# legs were NOT authored blind: a Windows exec-semantics simulation
+# (`#!/bin/sh` stubs raising WinError 193) isolated exactly three tests that
+# would have failed there, plus one `shutil.which()`/`%PATHEXT%` discovery
+# test; all four now carry skip markers, and the remaining suite was measured
+# green under that simulation (54 passed / 15 skipped / 0 failed). macOS
+# carries no simulated evidence — it is POSIX and the risk was judged low.
+#
+# Claims discipline (item 23): no OS is named in README.md until its leg here
+# is green. Removing an OS from this matrix means removing it from that
+# sentence in the same commit.
+name: ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.11", "3.12"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: iamf-sentinel-pro
+      # The core's SOURCE tree — supplies fixtures/ (not shipped in the wheel).
+      - uses: actions/checkout@v4
+        with:
+          repository: jlivingston-Cipher/iamf-sentinel
+          path: iamf-sentinel
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -e ".[test]"
+        working-directory: iamf-sentinel-pro
+      # Oracle-gated, sample-gated, kernel-gated and (on Windows) POSIX-stub
+      # tests skip cleanly in this environment; zero failures is the gate.
+      - run: python -m pytest tests -q
+        working-directory: iamf-sentinel-pro

@@ -70,7 +70,7 @@ def test_read_wav_rejects_non_riff(tmp_path):
 
 def test_find_ear_env_wins(tmp_path, monkeypatch):
     fake = tmp_path / "ear-render"
-    fake.write_text("#!/bin/sh\nexit 0\n")
+    fake.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     fake.chmod(0o755)
     monkeypatch.setenv("SENTINEL_EAR", str(fake))
     assert find_ear() == str(fake)
@@ -125,7 +125,7 @@ def test_compare_without_ear_errors(tmp_path, monkeypatch):
 
 def test_compare_without_toolchain_errors(tmp_path, monkeypatch):
     fake_ear = tmp_path / "ear-render"
-    fake_ear.write_text("#!/bin/sh\nexit 0\n")
+    fake_ear.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     fake_ear.chmod(0o755)
     monkeypatch.delenv("SENTINEL_TOOLCHAIN", raising=False)
     monkeypatch.setenv("PATH", str(tmp_path))          # ear yes, oracles no
@@ -137,11 +137,11 @@ def test_compare_without_toolchain_errors(tmp_path, monkeypatch):
 
 def test_compare_unsupported_layout_errors(tmp_path):
     fake_ear = tmp_path / "ear-render"
-    fake_ear.write_text("#!/bin/sh\nexit 0\n")
+    fake_ear.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     fake_ear.chmod(0o755)
     dm = tmp_path / "root/src/build-iamf/decoder_main"
     dm.parent.mkdir(parents=True)
-    dm.write_text("#!/bin/sh\nexit 0\n")
+    dm.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     dm.chmod(0o755)
     tc = Toolchain.discover(str(tmp_path / "root"))
     res = compare(str(tmp_path / "s.wav"), str(tmp_path / "o.iamf"),

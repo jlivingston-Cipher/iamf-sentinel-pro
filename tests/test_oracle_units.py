@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -16,7 +17,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from sentinel_pro.oracle import (SOUND_SYSTEM_TO_LAYOUT, DecodeResult,  # noqa: E402
                                  Toolchain)
 
-from conftest import NO_OSS_SRC_REASON, OSS_SRC        # noqa: E402
+from conftest import (NO_OSS_SRC_REASON, OSS_SRC,      # noqa: E402
+                      needs_windows_pathext)
 
 if OSS_SRC is None:                                   # pragma: no cover
     pytest.skip(NO_OSS_SRC_REASON, allow_module_level=True)
@@ -28,11 +30,11 @@ def _fake_root(tmp_path, name="root"):
     root = tmp_path / name
     dm = root / "src/build-iamf/decoder_main"
     dm.parent.mkdir(parents=True)
-    dm.write_text("#!/bin/sh\nexit 0\n")
+    dm.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     dm.chmod(0o755)
     idc = root / "src/build-iamfdec/iamfdec"
     idc.parent.mkdir(parents=True)
-    idc.write_text("#!/bin/sh\nexit 0\n")
+    idc.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     idc.chmod(0o755)
     return root
 
@@ -52,8 +54,12 @@ def test_discover_explicit_root_wins(tmp_path, monkeypatch):
     root = _fake_root(tmp_path)
     tc = Toolchain.discover(str(root))
     assert tc.available
-    assert tc.decoder_main == str(root / "src/build-iamf/decoder_main")
-    assert tc.iamfdec == str(root / "src/build-iamfdec/iamfdec")
+    # Compare as paths, not strings: Toolchain builds its members by string
+    # concatenation with "/" (which keeps plan/evidence output platform-
+    # invariant, doc 97 3.2), so on Windows the product returns mixed
+    # separators and str(WindowsPath) does not. Both name the same file.
+    assert Path(tc.decoder_main) == root / "src/build-iamf/decoder_main"
+    assert Path(tc.iamfdec) == root / "src/build-iamfdec/iamfdec"
     assert set(tc.oracles()) == {"decoder_main", "iamfdec"}
 
 
@@ -61,19 +67,20 @@ def test_discover_env_root(tmp_path, monkeypatch):
     root = _fake_root(tmp_path)
     monkeypatch.setenv("SENTINEL_TOOLCHAIN", str(root))
     tc = Toolchain.discover()
-    assert tc.decoder_main == str(root / "src/build-iamf/decoder_main")
+    assert Path(tc.decoder_main) == root / "src/build-iamf/decoder_main"
 
 
+@needs_windows_pathext
 def test_discover_path_fallback(tmp_path, monkeypatch):
     monkeypatch.delenv("SENTINEL_TOOLCHAIN", raising=False)
     bindir = tmp_path / "bin"
     bindir.mkdir()
     dm = bindir / "decoder_main"
-    dm.write_text("#!/bin/sh\nexit 0\n")
+    dm.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     dm.chmod(0o755)
     monkeypatch.setenv("PATH", str(bindir))
     tc = Toolchain.discover()
-    assert tc.decoder_main == str(dm)
+    assert Path(tc.decoder_main) == dm
     assert tc.iamfdec is None
 
 
@@ -126,7 +133,7 @@ def test_decode_notes_when_decoder_absent(tmp_path):
 
 def test_decode_unknown_layout_mapping(tmp_path):
     dm = tmp_path / "iamfdec"
-    dm.write_text("#!/bin/sh\nexit 0\n")
+    dm.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     dm.chmod(0o755)
     tc = Toolchain(iamfdec=str(dm))
     try:
@@ -139,7 +146,7 @@ def test_decode_unknown_layout_mapping(tmp_path):
 def test_decode_exit_zero_but_no_output_is_not_ok(tmp_path):
     # the F8 judgment: judge by the rendered file, never by rc
     dm = tmp_path / "decoder_main"
-    dm.write_text("#!/bin/sh\nexit 0\n")                  # writes nothing
+    dm.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")                  # writes nothing
     dm.chmod(0o755)
     tc = Toolchain(decoder_main=str(dm))
     try:

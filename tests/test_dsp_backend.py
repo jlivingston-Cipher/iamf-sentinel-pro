@@ -77,7 +77,7 @@ def stereo_wav(tmp_path):
 
 def test_discovery_env_explicit_wins(monkeypatch, tmp_path):
     stub = tmp_path / "stub-dsp"
-    stub.write_text("#!/bin/sh\nexit 0\n")
+    stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
     monkeypatch.setenv("SENTINEL_DSP", str(stub))
     assert dsp.kernel_path() == str(stub)
@@ -98,7 +98,7 @@ def test_discovery_bad_explicit_path_raises(monkeypatch, tmp_path):
 @needs_windows_pathext
 def test_discovery_path_fallback(monkeypatch, tmp_path):
     stub = tmp_path / "sentinel-dsp"
-    stub.write_text("#!/bin/sh\nexit 0\n")
+    stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     stub.chmod(stub.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     monkeypatch.delenv("SENTINEL_DSP", raising=False)
     monkeypatch.setenv("PATH", str(tmp_path))
@@ -137,7 +137,7 @@ def test_forced_kernel_without_binary_raises(monkeypatch, stereo_wav, tmp_path):
 def test_broken_kernel_is_error_not_fallback(monkeypatch, stereo_wav, tmp_path):
     """D-S3: present-but-failing kernel never silently downgrades to numpy."""
     stub = tmp_path / "sentinel-dsp"
-    stub.write_text("#!/bin/sh\necho 'kaboom' >&2\nexit 3\n")
+    stub.write_text("#!/bin/sh\necho 'kaboom' >&2\nexit 3\n", encoding="utf-8")
     stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
     monkeypatch.setenv("SENTINEL_DSP", str(stub))
     with pytest.raises(dsp.KernelError, match="exited 3.*kaboom"):
@@ -147,7 +147,7 @@ def test_broken_kernel_is_error_not_fallback(monkeypatch, stereo_wav, tmp_path):
 @needs_posix_shell
 def test_kernel_invalid_json_is_error(monkeypatch, stereo_wav, tmp_path):
     stub = tmp_path / "sentinel-dsp"
-    stub.write_text("#!/bin/sh\necho 'not json'\nexit 0\n")
+    stub.write_text("#!/bin/sh\necho 'not json'\nexit 0\n", encoding="utf-8")
     stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
     monkeypatch.setenv("SENTINEL_DSP", str(stub))
     with pytest.raises(dsp.KernelError, match="invalid JSON"):
@@ -157,7 +157,7 @@ def test_kernel_invalid_json_is_error(monkeypatch, stereo_wav, tmp_path):
 @needs_posix_shell
 def test_kernel_missing_fields_is_error(monkeypatch, stereo_wav, tmp_path):
     stub = tmp_path / "sentinel-dsp"
-    stub.write_text("#!/bin/sh\necho '{\"sample_rate\": 48000}'\nexit 0\n")
+    stub.write_text("#!/bin/sh\necho '{\"sample_rate\": 48000}'\nexit 0\n", encoding="utf-8")
     stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
     monkeypatch.setenv("SENTINEL_DSP", str(stub))
     with pytest.raises(dsp.KernelError, match="missing fields"):

@@ -1,0 +1,32 @@
+# ============================================================================
+# adm-compare variant — LANDED, NOT PUBLISHED IN v1 (doc 40 decision,
+# 2026-07-21). Realizes the recipe note at the bottom of oci/Dockerfile as a
+# buildable artifact, kept in a separate file so the main Dockerfile's default
+# target (and the doc-38/39 sanctioned invocations) stay byte-compatible.
+#
+# Build FROM an already-built lean image (either stage-2 realization):
+#   docker build -f oci/Dockerfile.adm --build-arg BASE=<lean-image-tag> oci/
+#
+# What it adds (measured, doc 40, stand-in bases): numpy+scipy dist-packages
+# ≈ 209 MB + EAR venv ≈ 268 MB ⇒ ≈ +477 MB; projected release size
+# ≈ 155 + 477 ≈ 630 MB (vs 155 MB lean). This is exactly the install-rot
+# surface ADR-6b shed from the lean image (F30: ear==2.1.0 needs a venv +
+# setuptools<81) — baked here so users never meet F30. Publication trigger:
+# WP3b threshold recalibration on real masters, or the first transpiler-QC
+# (doc 13) customer need — until then, build on demand.
+# ============================================================================
+ARG BASE=iamf-sentinel-pro:latest
+FROM ${BASE}
+# numpy restores the Python reference backend + adm-compare + diff --render
+# (iamf-sentinel-pro's [numpy] extra, doc 35 D-S6). scipy is ALSO required:
+# adm_compare's S-331 matched filter imports scipy.signal.correlate (found by
+# executing this stage, doc 40 — the main Dockerfile's original recipe note
+# said numpy only and produced a broken adm-compare; dsp.py's scipy use is
+# guarded with a numpy fallback, adm_compare's is not). The EAR venv is the
+# F30 recipe (doc 31) verbatim; /opt/earvenv/bin/ear-render is on
+# adm_compare's discovery path.
+RUN pip install --no-cache-dir "numpy>=1.24" "scipy>=1.10" \
+    && python3 -m venv /opt/earvenv \
+    && /opt/earvenv/bin/pip install --no-cache-dir "setuptools<81" \
+    && /opt/earvenv/bin/pip install --no-cache-dir "ear==2.1.0"
+# ENTRYPOINT/CMD inherited: `sentinel` — adm-compare now passes its numpy gate.

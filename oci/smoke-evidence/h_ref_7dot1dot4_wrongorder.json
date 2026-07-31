@@ -1,0 +1,141 @@
+{
+  "sentinel_version": "0.1.0",
+  "summary": {
+    "source": "/home/claude/work/phase3b/sentinel-pro/samples-l3/7dot1dot4_wrongorder.iamf",
+    "profile": "generic",
+    "container": "raw",
+    "result": "FAIL",
+    "counts": {
+      "FAIL": 4,
+      "WARN": 6,
+      "INFO": 1
+    },
+    "stream": {
+      "primary_profile": "Simple",
+      "codecs": [
+        "Opus"
+      ],
+      "audio_elements": 1,
+      "mix_presentations": 1,
+      "descriptor_bytes": 122,
+      "audio_frames": 3507
+    }
+  },
+  "findings": [
+    {
+      "check_id": "S-301",
+      "severity": "FAIL",
+      "message": "loudness is the unmeasured 0.0 default (integrated_loudness=0.0, digital_peak=0.0)",
+      "where": "mix_presentation 2 / Stereo",
+      "expected": "measured BS.1770 loudness",
+      "found": "0.0 LKFS / 0.0 dBFS",
+      "failure_modes": [
+        "F7"
+      ]
+    },
+    {
+      "check_id": "S-301",
+      "severity": "FAIL",
+      "message": "loudness is the unmeasured 0.0 default (integrated_loudness=0.0, digital_peak=0.0)",
+      "where": "mix_presentation 2 / 7.1.4",
+      "expected": "measured BS.1770 loudness",
+      "found": "0.0 LKFS / 0.0 dBFS",
+      "failure_modes": [
+        "F7"
+      ]
+    },
+    {
+      "check_id": "S-310",
+      "severity": "FAIL",
+      "message": "measured integrated loudness -12.63 LKFS differs from declared 0.00 LKFS by -12.63 LU (tolerance \u00b10.5 LU, oracle decoder_main)",
+      "where": "mix_presentation 2 / Stereo",
+      "expected": "0.00 LKFS",
+      "found": "-12.63 LKFS",
+      "failure_modes": [
+        "F7",
+        "F25"
+      ]
+    },
+    {
+      "check_id": "S-310",
+      "severity": "FAIL",
+      "message": "measured integrated loudness -10.93 LKFS differs from declared 0.00 LKFS by -10.93 LU (tolerance \u00b10.5 LU, oracle decoder_main)",
+      "where": "mix_presentation 2 / 7.1.4",
+      "expected": "0.00 LKFS",
+      "found": "-10.93 LKFS",
+      "failure_modes": [
+        "F7",
+        "F25"
+      ]
+    },
+    {
+      "check_id": "S-208",
+      "severity": "WARN",
+      "message": "mix_presentation annotation 'TestMix' is a template/placeholder \u2014 source programme names were dropped (F24)",
+      "where": "mix_presentation 2",
+      "found": "TestMix",
+      "failure_modes": [
+        "F24"
+      ]
+    },
+    {
+      "check_id": "S-304",
+      "severity": "WARN",
+      "message": "declared peak 0.00 dBFS is at/above full scale (clipping hazard)",
+      "where": "mix_presentation 2 / Stereo",
+      "found": "0.00 dBFS",
+      "failure_modes": [
+        "F21"
+      ]
+    },
+    {
+      "check_id": "S-304",
+      "severity": "WARN",
+      "message": "declared peak 0.00 dBFS is at/above full scale (clipping hazard)",
+      "where": "mix_presentation 2 / 7.1.4",
+      "found": "0.00 dBFS",
+      "failure_modes": [
+        "F21"
+      ]
+    },
+    {
+      "check_id": "S-311",
+      "severity": "WARN",
+      "message": "measured digital peak -4.49 dBFS differs from declared 0.00 dBFS by -4.49 dB (oracle decoder_main)",
+      "where": "mix_presentation 2 / Stereo",
+      "expected": "0.00 dBFS",
+      "found": "-4.49 dBFS",
+      "failure_modes": [
+        "F7"
+      ]
+    },
+    {
+      "check_id": "S-311",
+      "severity": "WARN",
+      "message": "measured digital peak -17.33 dBFS differs from declared 0.00 dBFS by -17.33 dB (oracle decoder_main)",
+      "where": "mix_presentation 2 / 7.1.4",
+      "expected": "0.00 dBFS",
+      "found": "-17.33 dBFS",
+      "failure_modes": [
+        "F7"
+      ]
+    },
+    {
+      "check_id": "S-321",
+      "severity": "WARN",
+      "message": "2 channel pair(s) carry effectively the same signal: Lss\u2248Rss (r=1.0000), Lrs\u2248Rrs (r=1.0000) \u2014 F4 duplication signature",
+      "where": "mix_presentation 2 / rendered 7.1.4 (decoder_main)",
+      "found": "Lss\u2248Rss (r=1.0000), Lrs\u2248Rrs (r=1.0000)",
+      "failure_modes": [
+        "F4"
+      ]
+    },
+    {
+      "check_id": "S-303",
+      "severity": "INFO",
+      "message": "no layout advertises true peak (info_type true-peak bit unset)",
+      "where": "mix_presentation 2"
+    }
+  ],
+  "exit_code": 1
+}

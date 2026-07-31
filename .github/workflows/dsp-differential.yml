@@ -1,0 +1,64 @@
+# sentinel-dsp ↔ dsp.py differential — the toolchain-free CI gate (ADR-6b, doc 35).
+#
+# Runs on every change to either implementation of the numeric core. This is
+# the synthetic half of the differential duty (doc 33); the render half (real
+# decoder-oracle vectors) lives in the toolchain-gated suite and is exercised
+# per-cycle, not per-commit.
+#
+# Provenance note: every command below was executed verbatim in the doc-35
+# session (results archived there); the workflow file itself is authored, not
+# yet run on a hosted runner (repo is pre-publication; goes live with the repos).
+name: dsp-differential
+on:
+  push:
+    paths:
+      - "sentinel_pro/dsp.py"
+      - "sentinel-dsp/**"
+      - ".github/workflows/dsp-differential.yml"
+  pull_request:
+    paths:
+      - "sentinel_pro/dsp.py"
+      - "sentinel-dsp/**"
+
+jobs:
+  differential:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: sentinel-pro
+      # The OSS core is a sibling checkout in the published layout.
+      - uses: actions/checkout@v4
+        with:
+          repository: jlivingston-Cipher/iamf-sentinel
+          path: sentinel-oss
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install numpy pytest
+      - name: Build kernel
+        run: |
+          cmake -S sentinel-pro/sentinel-dsp -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j
+      - name: Synthetic differential (gates 0.001 LU / 0.01 dB / verdict identity)
+        run: |
+          python sentinel-pro/sentinel-dsp/tests/differential.py \
+            --binary build/sentinel-dsp \
+            --oss sentinel-oss --pro sentinel-pro \
+            --out differential_synthetic.json
+      - name: Backend-switch tests — kernel-configured
+        env:
+          SENTINEL_DSP: ${{ github.workspace }}/build/sentinel-dsp
+          PYTHONPATH: sentinel-oss:sentinel-pro
+        run: pytest sentinel-pro/tests/test_dsp_backend.py -q
+      - name: Backend-switch tests — reference-forced (binary on PATH)
+        env:
+          SENTINEL_DSP: "off"
+          PYTHONPATH: sentinel-oss:sentinel-pro
+        run: |
+          export PATH="$PWD/build:$PATH"
+          pytest sentinel-pro/tests/test_dsp_backend.py -q
+      - uses: actions/upload-artifact@v4
+        with:
+          name: differential-results
+          path: differential_synthetic.json

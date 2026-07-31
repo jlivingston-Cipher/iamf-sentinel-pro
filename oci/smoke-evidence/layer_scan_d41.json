@@ -1,0 +1,29 @@
+{
+ "total_paths": 9924,
+ "violations": {
+  "opt_source_trees": [],
+  "kernel_cpp_source": [],
+  "egg_info_or_pip_build": [
+   "usr/lib/python3/dist-packages/setuptools-68.1.2.egg-info",
+   "usr/lib/python3/dist-packages/setuptools-68.1.2.egg-info/PKG-INFO",
+   "usr/lib/python3/dist-packages/setuptools-68.1.2.egg-info/dependency_links.txt",
+   "usr/lib/python3/dist-packages/setuptools-68.1.2.egg-info/entry_points.txt",
+   "usr/lib/python3/dist-packages/setuptools-68.1.2.egg-info/top_level.txt"
+  ],
+  "oci_machinery": []
+ },
+ "required": {
+  "site_pkg_sentinel": true,
+  "site_pkg_sentinel_pro": true,
+  "dist_infos": 2,
+  "profiles": 2,
+  "cli": true,
+  "kernel_bin": true,
+  "toolchain": [
+   true,
+   true,
+   true,
+   5
+  ]
+ }
+}

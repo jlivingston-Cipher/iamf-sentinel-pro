@@ -1,0 +1,215 @@
+"""ADR-6b backend switch tests (doc 35): discovery, contracts, mini differential.
+
+Toolchain-free by design — this is the CI half that runs on every change to
+either implementation (doc 33 "CI: the synthetic half"). The kernel-requiring
+tests locate the binary via $SENTINEL_DSP (a real path), else `sentinel-dsp`
+on $PATH; they skip only when no binary exists anywhere (the combined-suite
+configuration always provides one, keeping the 0-skipped bar).
+"""
+import json
+import os
+import shutil
+import stat
+import struct
+import subprocess
+import sys
+
+import pytest
+
+np = pytest.importorskip("numpy")
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from sentinel_pro import dsp  # noqa: E402
+
+SR = 48000
+
+# Differential gates — doc 32 pre-registration, unchanged.
+GATE_LU = 0.001
+GATE_DB = 0.01
+GATE_EPS = 1e-6
+
+
+def _find_kernel():
+    env = os.environ.get("SENTINEL_DSP", "")
+    if env and env.strip().lower() not in ("0", "off") and os.path.isfile(env):
+        return env
+    return shutil.which("sentinel-dsp")
+
+
+def write_wav(path, pcm, sr=SR, bits=24):
+    frames, ch = pcm.shape
+    if bits == 24:
+        ints = np.clip(np.round(pcm * (1 << 23)), -(1 << 23), (1 << 23) - 1).astype(np.int64)
+        u = ints.reshape(-1) & 0xFFFFFF
+        b = np.empty((u.size, 3), dtype=np.uint8)
+        b[:, 0] = u & 0xFF
+        b[:, 1] = (u >> 8) & 0xFF
+        b[:, 2] = (u >> 16) & 0xFF
+        raw, fmt = b.tobytes(), struct.pack("<HHIIHH", 1, ch, sr, sr * ch * 3, ch * 3, 24)
+    elif bits == 16:
+        raw = np.clip(np.round(pcm * (1 << 15)), -(1 << 15),
+                      (1 << 15) - 1).astype("<i2").reshape(-1).tobytes()
+        fmt = struct.pack("<HHIIHH", 1, ch, sr, sr * ch * 2, ch * 2, 16)
+    else:
+        raise ValueError(bits)
+    with open(path, "wb") as fh:
+        fh.write(b"RIFF" + struct.pack("<I", 4 + 8 + len(fmt) + 8 + len(raw)) + b"WAVE")
+        fh.write(b"fmt " + struct.pack("<I", len(fmt)) + fmt)
+        fh.write(b"data" + struct.pack("<I", len(raw)) + raw)
+
+
+def sine(freq, secs=4.0, level_db=-18.0, phase=0.0):
+    t = np.arange(int(secs * SR)) / SR
+    return (10 ** (level_db / 20.0)) * np.sin(2 * np.pi * freq * t + phase)
+
+
+@pytest.fixture
+def stereo_wav(tmp_path):
+    p = str(tmp_path / "stereo.wav")
+    write_wav(p, np.stack([sine(997), sine(1499)], axis=1))
+    return p
+
+
+# ---------------------------------------------------------------- discovery
+
+def test_discovery_env_explicit_wins(monkeypatch, tmp_path):
+    stub = tmp_path / "stub-dsp"
+    stub.write_text("#!/bin/sh\nexit 0\n")
+    stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("SENTINEL_DSP", str(stub))
+    assert dsp.kernel_path() == str(stub)
+
+
+@pytest.mark.parametrize("val", ["off", "0", "", "OFF"])
+def test_discovery_off_forces_python(monkeypatch, val):
+    monkeypatch.setenv("SENTINEL_DSP", val)
+    assert dsp.kernel_path() is None
+
+
+def test_discovery_bad_explicit_path_raises(monkeypatch, tmp_path):
+    monkeypatch.setenv("SENTINEL_DSP", str(tmp_path / "no-such-binary"))
+    with pytest.raises(dsp.KernelError):
+        dsp.kernel_path()
+
+
+def test_discovery_path_fallback(monkeypatch, tmp_path):
+    stub = tmp_path / "sentinel-dsp"
+    stub.write_text("#!/bin/sh\nexit 0\n")
+    stub.chmod(stub.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    monkeypatch.delenv("SENTINEL_DSP", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert dsp.kernel_path() == str(stub)
+
+
+def test_discovery_absent_means_python(monkeypatch, tmp_path):
+    monkeypatch.delenv("SENTINEL_DSP", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path))          # empty dir
+    assert dsp.kernel_path() is None
+
+
+# ---------------------------------------------------------------- contracts
+
+def test_analyze_python_matches_reference(monkeypatch, stereo_wav):
+    monkeypatch.setenv("SENTINEL_DSP", "off")
+    a = dsp.analyze(stereo_wav, layout="2.0")
+    assert a["backend"] == "python"
+    sr, pcm = dsp.read_wav(stereo_wav)
+    assert a["sample_rate"] == sr and a["channels"] == 2
+    assert a["integrated_lufs"] == dsp.integrated_loudness(
+        pcm, sr, dsp.CHANNEL_WEIGHTS["2.0"])
+    assert a["digital_peak_dbfs"] == dsp.digital_peak_dbfs(pcm)
+    assert a["true_peak_dbtp"] == dsp.true_peak_dbtp(pcm)
+    assert a["correlation"]["silent_channels"] == dsp.silent_channels(pcm)
+
+
+def test_forced_kernel_without_binary_raises(monkeypatch, stereo_wav, tmp_path):
+    monkeypatch.delenv("SENTINEL_DSP", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    with pytest.raises(dsp.KernelError):
+        dsp.analyze(stereo_wav, layout="2.0", backend="kernel")
+
+
+def test_broken_kernel_is_error_not_fallback(monkeypatch, stereo_wav, tmp_path):
+    """D-S3: present-but-failing kernel never silently downgrades to numpy."""
+    stub = tmp_path / "sentinel-dsp"
+    stub.write_text("#!/bin/sh\necho 'kaboom' >&2\nexit 3\n")
+    stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("SENTINEL_DSP", str(stub))
+    with pytest.raises(dsp.KernelError, match="exited 3.*kaboom"):
+        dsp.analyze(stereo_wav, layout="2.0")
+
+
+def test_kernel_invalid_json_is_error(monkeypatch, stereo_wav, tmp_path):
+    stub = tmp_path / "sentinel-dsp"
+    stub.write_text("#!/bin/sh\necho 'not json'\nexit 0\n")
+    stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("SENTINEL_DSP", str(stub))
+    with pytest.raises(dsp.KernelError, match="invalid JSON"):
+        dsp.analyze(stereo_wav, layout="2.0")
+
+
+def test_kernel_missing_fields_is_error(monkeypatch, stereo_wav, tmp_path):
+    stub = tmp_path / "sentinel-dsp"
+    stub.write_text("#!/bin/sh\necho '{\"sample_rate\": 48000}'\nexit 0\n")
+    stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("SENTINEL_DSP", str(stub))
+    with pytest.raises(dsp.KernelError, match="missing fields"):
+        dsp.analyze(stereo_wav, layout="2.0")
+
+
+# ------------------------------------------------- mini differential (E-K2)
+
+def _vectors(tmp_path):
+    out = []
+    p = str(tmp_path / "d_stereo.wav")
+    write_wav(p, np.stack([sine(997), sine(1499)], axis=1))
+    out.append((p, "2.0"))
+    base = [sine(313 + 139 * k) for k in range(6)]
+    base[2] = np.zeros_like(base[2])       # C silent
+    base[5] = base[4].copy()               # Rs := Ls
+    p = str(tmp_path / "d_dupsilent.wav")
+    write_wav(p, np.stack(base, axis=1))
+    out.append((p, "5.1"))
+    p = str(tmp_path / "d_short.wav")
+    write_wav(p, np.stack([sine(997, 0.25), sine(1499, 0.25)], axis=1), bits=16)
+    out.append((p, "2.0"))
+    return out
+
+
+def test_kernel_matches_python_within_gates(monkeypatch, tmp_path):
+    binary = _find_kernel()
+    if not binary:
+        pytest.skip("no sentinel-dsp binary available ($SENTINEL_DSP / $PATH)")
+    for path, layout in _vectors(tmp_path):
+        monkeypatch.setenv("SENTINEL_DSP", binary)
+        k = dsp.analyze(path, layout=layout)
+        monkeypatch.setenv("SENTINEL_DSP", "off")
+        py = dsp.analyze(path, layout=layout)
+        assert k["backend"] == "kernel" and py["backend"] == "python"
+        assert abs(k["integrated_lufs"] - py["integrated_lufs"]) <= GATE_LU
+        assert abs(k["digital_peak_dbfs"] - py["digital_peak_dbfs"]) <= GATE_DB
+        assert abs(k["true_peak_dbtp"] - py["true_peak_dbtp"]) <= GATE_DB
+        assert (k["correlation"]["silent_channels"]
+                == py["correlation"]["silent_channels"])
+        assert ([(i, j) for i, j, _ in k["correlation"]["duplicate_pairs"]]
+                == [(i, j) for i, j, _ in py["correlation"]["duplicate_pairs"]])
+        assert abs(k["correlation"]["mean_offdiag"]
+                   - py["correlation"]["mean_offdiag"]) <= GATE_EPS
+        ke, pe = k["energy_profile"], py["energy_profile"]
+        assert ke["windows"] == pe["windows"]
+        if pe["median_dev"] is not None:
+            assert abs(ke["median_dev"] - pe["median_dev"]) <= GATE_EPS
+            assert abs(ke["p95_dev"] - pe["p95_dev"]) <= GATE_EPS
+
+
+def test_kernel_json_is_parseable_document(monkeypatch, tmp_path, stereo_wav):
+    """The raw subprocess emits one valid JSON document (the ADR-4 boundary)."""
+    binary = _find_kernel()
+    if not binary:
+        pytest.skip("no sentinel-dsp binary available ($SENTINEL_DSP / $PATH)")
+    r = subprocess.run([binary, stereo_wav, "--layout", "2.0"],
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0
+    doc = json.loads(r.stdout)
+    assert doc["tool"] == "sentinel-dsp"
+    assert doc["channels"] == 2

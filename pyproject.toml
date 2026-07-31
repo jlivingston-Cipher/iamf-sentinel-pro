@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "iamf-sentinel-pro"
+version = "0.3.0"
+description = "Pro plugin for iamf-sentinel: L3 rendered QC (decoder oracles + BS.1770-4), ADM source-referenced fidelity QC, platform profile packs"
+readme = "README.md"
+requires-python = ">=3.11"
+keywords = ["iamf", "immersive-audio", "loudness", "bs1770", "adm", "qc"]
+license = { text = "Apache-2.0" }          # A′ (doc 48): the whole stack is Apache-2.0; the seam is architecture, not a license boundary
+authors = [{ name = "The iamf-sentinel authors" }]
+# numpy moved to an extra by the ADR-6b backend switch (doc 35): a kernel-backed
+# install (sentinel-dsp binary on $PATH) runs `validate --l3` with no scientific
+# stack. The [numpy] extra restores the Python reference backend, adm-compare,
+# and diff --render.
+dependencies = ["iamf-sentinel>=0.3.0"]
+
+[project.optional-dependencies]
+# scipy: adm-compare's alignment cross-correlation (doc 31). Anything that
+# imports adm_compare or diff --render needs this extra.
+numpy = ["numpy>=1.24", "scipy>=1.10"]
+test = ["pytest>=7", "numpy>=1.24", "scipy>=1.10"]
+
+[tool.setuptools]
+packages = ["sentinel_pro"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+sentinel_pro = ["profiles/*.toml", "py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+# Lint with ruff defaults (E4/E7/E9/F). The fixture/dev tier deliberately uses a
+# compact one-line idiom; the per-file ignores below codify that two-tier style.
+target-version = "py311"
+
+[tool.ruff.lint.per-file-ignores]
+"sentinel-dsp/tests/differential.py" = ["E702"]  # compact vector-builder tier
+"tests/test_adm_compare.py" = ["E402"]           # imports follow importorskip
+

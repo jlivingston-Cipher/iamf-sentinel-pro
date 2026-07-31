@@ -1,0 +1,19 @@
+# .dockerignore — release hygiene (doc 40, closes the doc-36/38/39 "nicety").
+# Context = the Pro repo root; Dockerfile = oci/Dockerfile.
+# Every COPY enumerated against these rules (doc 40 D-R1; runtime COPY moved
+# to the discarded pybuild stage by doc 41 — the rules still trim the context):
+#   stage 1 (kernel):           COPY sentinel-dsp            -> kept (root tests/ rule does not match sentinel-dsp/tests)
+#   stage 2 (toolchain-source): COPY oci/toolchain-build.sh, oci/port/CMakeLists.txt -> kept
+#   pybuild (doc 41):           COPY . /src/sentinel-pro     -> trimmed of test/QC material below
+# The wheel build needs only pyproject.toml + sentinel_pro/ (no readme/license file reference).
+samples-l3/
+tests/
+fixtures/
+.github/
+oci/smoke-evidence/
+.pytest_cache/
+**/__pycache__/
+*.pyc
+build/
+*.egg-info/
+.dockerignore

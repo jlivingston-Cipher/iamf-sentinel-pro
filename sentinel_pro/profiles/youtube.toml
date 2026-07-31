@@ -1,0 +1,16 @@
+name = "youtube"
+description = "YouTube IAMF ingest: Base profile, Opus essence, IAMF-in-MP4, fast-start (WP1 G9 validated candidate)."
+
+# Hard requirements asserted against the descriptor/container. Each mismatch is
+# a FAIL under this profile.
+[require]
+primary_profile = 1        # Base (YouTube advertises iamf.001.001.Opus)
+codec_id = "Opus"
+container = "mp4"
+brand = "iamf"
+
+# Per-check severity overrides layered on the registry defaults.
+[severity]
+"S-402" = "FAIL"           # fast-start is mandatory for ingest
+"S-301" = "FAIL"           # unmeasured 0.0 loudness is rejected
+"S-403" = "WARN"           # codec-string casing (F12)

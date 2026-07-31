@@ -1,0 +1,18 @@
+iamf-sentinel-pro
+Copyright 2026 The iamf-sentinel authors
+
+This product includes software developed as original, clean-room
+implementations: the BS.1770-4 loudness / true-peak measurement (dsp.py
+and the sentinel-dsp C++ kernel) written from ITU-R BS.1770-4; the ADM
+source-referenced comparison's BW64/chna/axml reader written from
+ITU-R BS.2088 and EBU Tech 3285; and the ISO-BMFF handling written from
+ISO/IEC 14496-12. No AOM reference-decoder or reference-encoder source
+code is used or derived. Reference decoders (decoder_main, iamfdec) and
+EAR (ear-render) are invoked strictly as subprocess oracles across CLI
+boundaries. numpy (BSD-licensed) is an optional dependency.
+
+"IAMF" is used descriptively. "Eclipsa" is a trademark of its owner and
+is not used in this project's naming. "YouTube" is a trademark of Google
+LLC, used nominatively to identify a delivery target (the youtube profile
+pack); this project is independent and is not affiliated with or endorsed
+by Google or YouTube.

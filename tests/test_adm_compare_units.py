@@ -148,3 +148,85 @@ def test_compare_unsupported_layout_errors(tmp_path):
                   layout="22.2", ear_bin=str(fake_ear), toolchain=tc)
     assert res.exit_code() == 2
     assert "unsupported layout" in res.execution_error
+
+
+# ------------------------------------------------------- BW64 (BS.2088) walk
+
+from sentinel_pro.adm_compare import (_find_chunks, below_threshold_tracks,  # noqa: E402
+                                      silence_tracks)
+
+
+def _write_bw64_adm(path, frames=480, ch=2, importance=3):
+    """Minimal BW64/RF64 ADM: ds64 + fmt(16-bit) + chna + axml + sentinel-size
+    data. The data chunk's 32-bit size field carries the 0xFFFFFFFF sentinel and
+    the real size lives only in ds64.dataSize — the shape every >4 GiB master
+    uses (exercised here without a multi-gigabyte payload)."""
+    fmt = struct.pack("<HHIIHH", 1, ch, 48000, 48000 * ch * 2, ch * 2, 16)
+    # per-track distinct byte patterns so zeroing is attributable
+    raw = bytearray()
+    for _ in range(frames):
+        for c in range(ch):
+            raw += struct.pack("<h", 0x1111 * (c + 1))
+    chna = struct.pack("<HH", ch, ch)
+    for i in range(ch):
+        chna += struct.pack("<H", i + 1)
+        chna += (f"ATU_{i + 1:08d}".encode().ljust(12, b"\x00"))
+        chna += (f"AT_0003{0x1001 + i:04x}_01".encode().ljust(14, b"\x00"))
+        chna += (f"AP_0003{0x1001 + i:04x}".encode().ljust(11, b"\x00") + b"\x00")
+    axml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<ebuCoreMain xmlns="urn:ebu:metadata-schema:ebuCore_2016">'
+        '<coreMetadata><format>'
+        '<audioFormatExtended version="ITU-R_BS.2076-2">'
+        '<audioProgramme audioProgrammeID="APR_1001"></audioProgramme>'
+        f'<audioObject audioObjectID="AO_1001" audioObjectName="Obj1" '
+        f'importance="{importance}">'
+        '<audioTrackUIDRef>ATU_00000001</audioTrackUIDRef></audioObject>'
+        '<audioObject audioObjectID="AO_1002" audioObjectName="Obj2">'
+        '<audioTrackUIDRef>ATU_00000002</audioTrackUIDRef></audioObject>'
+        '</audioFormatExtended></format></coreMetadata></ebuCoreMain>'
+    ).encode()
+
+    def chunk(cid, payload, sentinel=False):
+        size = 0xFFFFFFFF if sentinel else len(payload)
+        out = cid + struct.pack("<I", size) + payload
+        if len(payload) & 1:
+            out += b"\x00"
+        return out
+
+    ds64 = struct.pack("<QQQI", 0, len(raw), frames, 0)
+    body = (b"WAVE" + chunk(b"ds64", ds64) + chunk(b"fmt ", fmt)
+            + chunk(b"chna", chna) + chunk(b"axml", axml)
+            + chunk(b"data", bytes(raw), sentinel=True))
+    with open(path, "wb") as fh:
+        fh.write(b"BW64" + struct.pack("<I", 0xFFFFFFFF) + body)
+    return len(raw)
+
+
+def test_bw64_find_chunks_resolves_data_sentinel(tmp_path):
+    p = str(tmp_path / "m.wav")
+    data_len = _write_bw64_adm(p)
+    with open(p, "rb") as fh:
+        chunks = _find_chunks(fh.read())
+    assert chunks[b"data"][1] == data_len          # sentinel resolved via ds64
+    assert b"axml" in chunks and b"chna" in chunks
+
+
+def test_bw64_below_threshold_tracks(tmp_path):
+    p = str(tmp_path / "m.wav")
+    _write_bw64_adm(p, importance=3)
+    tracks, names = below_threshold_tracks(p, 10)
+    assert tracks == [1] and names == ["Obj1"]     # Obj2 has no importance attr
+
+
+def test_bw64_silence_tracks_round_trip(tmp_path):
+    src, dst = str(tmp_path / "m.wav"), str(tmp_path / "out.wav")
+    _write_bw64_adm(src)
+    silence_tracks(src, [1], dst)                  # raised ValueError pre-fix
+    a, b = open(src, "rb").read(), open(dst, "rb").read()
+    assert len(a) == len(b)
+    off, size = _find_chunks(a)[b"data"]
+    assert a[:off] == b[:off] and a[off + size:] == b[off + size:]
+    frames = np.frombuffer(b, dtype="<i2", count=size // 2, offset=off).reshape(-1, 2)
+    assert not frames[:, 0].any()                  # track 1 zeroed
+    assert (frames[:, 1] == 0x2222).all()          # track 2 untouched

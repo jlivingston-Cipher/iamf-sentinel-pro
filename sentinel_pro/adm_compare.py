@@ -95,10 +95,21 @@ def _read_wav(path: str) -> tuple[np.ndarray, int]:
 
 
 def _find_chunks(data: bytes) -> dict[bytes, tuple[int, int]]:
-    """chunk id -> (payload offset, size); first occurrence wins."""
+    """chunk id -> (payload offset, size); first occurrence wins.
+
+    BW64/RF64-aware: a data chunk whose 32-bit size field is the 0xFFFFFFFF
+    sentinel is resolved through ds64's dataSize (second uint64 of the ds64
+    payload), so >4 GiB masters — the files BS.2088 exists for — walk and
+    slice correctly instead of exploding the frame math downstream.
+    """
     out, pos, end = {}, 12, len(data)
+    ds64_data_size = None
     while pos + 8 <= end:
         cid, size = data[pos:pos + 4], struct.unpack("<I", data[pos + 4:pos + 8])[0]
+        if cid == b"ds64" and pos + 24 <= end:
+            ds64_data_size = struct.unpack("<Q", data[pos + 16:pos + 24])[0]
+        if size == 0xFFFFFFFF and cid == b"data" and ds64_data_size is not None:
+            size = ds64_data_size
         out.setdefault(cid, (pos + 8, size))
         pos += 8 + size + (size & 1)
     return out

@@ -169,7 +169,8 @@ class Toolchain:
             return DecodeResult(False, decoder, layout, note=f"unknown decoder {decoder}")
 
         try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            r = subprocess.run(cmd, capture_output=True, text=True,
+                               encoding="utf-8", timeout=timeout)
         except subprocess.TimeoutExpired:
             return DecodeResult(False, decoder, layout, note="decode timeout")
         except OSError as e:

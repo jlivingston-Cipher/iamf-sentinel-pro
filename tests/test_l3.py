@@ -73,7 +73,7 @@ def write_wav(path, pcm, sr=48000):
 def ffmpeg_measure(path):
     r = subprocess.run([FFMPEG, "-hide_banner", "-nostats", "-i", path,
                         "-filter_complex", "ebur128=peak=true", "-f", "null", "-"],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, encoding="utf-8")
     integ = float(re.findall(r"I:\s*(-?[\d.]+)\s*LUFS", r.stderr)[-1])
     tp = re.findall(r"Peak:\s*(-?[\d.]+)\s*dBFS", r.stderr)
     return integ, (float(tp[-1]) if tp else None)

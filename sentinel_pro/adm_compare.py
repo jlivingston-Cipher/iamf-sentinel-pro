@@ -168,7 +168,8 @@ def ear_render(ear_bin: str, adm_path: str, layout: str, out_wav: str,
     cmd = [ear_bin, "-s", EAR_LAYOUTS[layout], "--enable-block-duration-fix",
            adm_path, out_wav]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        r = subprocess.run(cmd, capture_output=True, text=True,
+                           encoding="utf-8", timeout=timeout)
     except (subprocess.TimeoutExpired, OSError) as e:
         return False, str(e)
     ok = r.returncode == 0 and os.path.exists(out_wav) and os.path.getsize(out_wav) > 44

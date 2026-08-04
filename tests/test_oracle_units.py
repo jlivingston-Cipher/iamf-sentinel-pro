@@ -18,7 +18,7 @@ from sentinel_pro.oracle import (SOUND_SYSTEM_TO_LAYOUT, DecodeResult,  # noqa: 
                                  Toolchain)
 
 from conftest import (NO_OSS_SRC_REASON, OSS_SRC,      # noqa: E402
-                      needs_windows_pathext)
+                      write_exec_stub)
 
 if OSS_SRC is None:                                   # pragma: no cover
     pytest.skip(NO_OSS_SRC_REASON, allow_module_level=True)
@@ -70,17 +70,17 @@ def test_discover_env_root(tmp_path, monkeypatch):
     assert Path(tc.decoder_main) == root / "src/build-iamf/decoder_main"
 
 
-@needs_windows_pathext
 def test_discover_path_fallback(tmp_path, monkeypatch):
+    # %PATHEXT%-aware on Windows: the stub is `decoder_main.cmd` there and
+    # `which()` must still resolve the bare name (item 25). Compare with
+    # samefile, not string equality — which() chooses the extension there.
     monkeypatch.delenv("SENTINEL_TOOLCHAIN", raising=False)
     bindir = tmp_path / "bin"
     bindir.mkdir()
-    dm = bindir / "decoder_main"
-    dm.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    dm.chmod(0o755)
+    dm = write_exec_stub(bindir, "decoder_main")
     monkeypatch.setenv("PATH", str(bindir))
     tc = Toolchain.discover()
-    assert Path(tc.decoder_main) == dm
+    assert tc.decoder_main is not None and os.path.samefile(tc.decoder_main, dm)
     assert tc.iamfdec is None
 
 

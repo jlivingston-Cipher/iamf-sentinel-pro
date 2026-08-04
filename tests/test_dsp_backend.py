@@ -16,8 +16,7 @@ import sys
 
 import pytest
 
-from conftest import (needs_posix_shell,      # noqa: E402
-                      needs_windows_pathext)
+from conftest import write_exec_stub          # noqa: E402
 
 np = pytest.importorskip("numpy")
 
@@ -95,14 +94,29 @@ def test_discovery_bad_explicit_path_raises(monkeypatch, tmp_path):
         dsp.kernel_path()
 
 
-@needs_windows_pathext
 def test_discovery_path_fallback(monkeypatch, tmp_path):
-    stub = tmp_path / "sentinel-dsp"
-    stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    stub.chmod(stub.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    # %PATHEXT%-aware on Windows: the stub is `sentinel-dsp.cmd` there and
+    # `which()` must still resolve the bare name (item 25).
+    stub = write_exec_stub(tmp_path, "sentinel-dsp")
     monkeypatch.delenv("SENTINEL_DSP", raising=False)
     monkeypatch.setenv("PATH", str(tmp_path))
-    assert dsp.kernel_path() == str(stub)
+    found = dsp.kernel_path()
+    assert found is not None and os.path.samefile(found, stub)
+
+
+def test_exec_stub_selfcheck(tmp_path):
+    """The stub helper's own contract, proven on every leg (item 25).
+
+    This is the meta-test that keeps the Windows `.cmd` mechanics honest:
+    exit code, stdout and stderr all round-trip through a real subprocess.
+    """
+    stub = write_exec_stub(tmp_path, "stubcheck", stdout="out here",
+                           stderr="err here", exit_code=5)
+    r = subprocess.run([str(stub)], capture_output=True, text=True,
+                       encoding="utf-8", timeout=60)
+    assert r.returncode == 5
+    assert "out here" in r.stdout
+    assert "err here" in r.stderr
 
 
 def test_discovery_absent_means_python(monkeypatch, tmp_path):
@@ -133,32 +147,25 @@ def test_forced_kernel_without_binary_raises(monkeypatch, stereo_wav, tmp_path):
         dsp.analyze(stereo_wav, layout="2.0", backend="kernel")
 
 
-@needs_posix_shell
 def test_broken_kernel_is_error_not_fallback(monkeypatch, stereo_wav, tmp_path):
     """D-S3: present-but-failing kernel never silently downgrades to numpy."""
-    stub = tmp_path / "sentinel-dsp"
-    stub.write_text("#!/bin/sh\necho 'kaboom' >&2\nexit 3\n", encoding="utf-8")
-    stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
+    stub = write_exec_stub(tmp_path, "sentinel-dsp",
+                           stderr="kaboom", exit_code=3)
     monkeypatch.setenv("SENTINEL_DSP", str(stub))
     with pytest.raises(dsp.KernelError, match="exited 3.*kaboom"):
         dsp.analyze(stereo_wav, layout="2.0")
 
 
-@needs_posix_shell
 def test_kernel_invalid_json_is_error(monkeypatch, stereo_wav, tmp_path):
-    stub = tmp_path / "sentinel-dsp"
-    stub.write_text("#!/bin/sh\necho 'not json'\nexit 0\n", encoding="utf-8")
-    stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
+    stub = write_exec_stub(tmp_path, "sentinel-dsp", stdout="not json")
     monkeypatch.setenv("SENTINEL_DSP", str(stub))
     with pytest.raises(dsp.KernelError, match="invalid JSON"):
         dsp.analyze(stereo_wav, layout="2.0")
 
 
-@needs_posix_shell
 def test_kernel_missing_fields_is_error(monkeypatch, stereo_wav, tmp_path):
-    stub = tmp_path / "sentinel-dsp"
-    stub.write_text("#!/bin/sh\necho '{\"sample_rate\": 48000}'\nexit 0\n", encoding="utf-8")
-    stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
+    stub = write_exec_stub(tmp_path, "sentinel-dsp",
+                           stdout='{"sample_rate": 48000}')
     monkeypatch.setenv("SENTINEL_DSP", str(stub))
     with pytest.raises(dsp.KernelError, match="missing fields"):
         dsp.analyze(stereo_wav, layout="2.0")
@@ -215,7 +222,8 @@ def test_kernel_json_is_parseable_document(monkeypatch, tmp_path, stereo_wav):
     if not binary:
         pytest.skip("no sentinel-dsp binary available ($SENTINEL_DSP / $PATH)")
     r = subprocess.run([binary, stereo_wav, "--layout", "2.0"],
-                       capture_output=True, text=True, timeout=60)
+                       capture_output=True, text=True, encoding="utf-8",
+                       timeout=60)
     assert r.returncode == 0
     doc = json.loads(r.stdout)
     assert doc["tool"] == "sentinel-dsp"

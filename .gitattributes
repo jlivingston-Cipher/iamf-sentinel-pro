@@ -1,0 +1,6 @@
+# Item 32 (doc 108): one checkout policy for every platform. Text files are
+# normalized to LF in the repo AND at checkout — a Windows clone sees the
+# same bytes the suites, the manifest hashes (doc 97) and the encoding
+# guards (doc 105 §11.5) were measured against. `text=auto` touches only
+# files git itself classifies as text; binaries are untouched.
+* text=auto eol=lf

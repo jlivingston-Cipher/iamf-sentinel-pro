@@ -436,7 +436,7 @@ def _analyze_kernel(binary: str, wav_path: str, layout: str | None,
         cmd += ["--layout", layout]
     try:
         r = subprocess.run(cmd, capture_output=True, text=True,
-                           timeout=_KERNEL_TIMEOUT_S)
+                           encoding="utf-8", timeout=_KERNEL_TIMEOUT_S)
     except subprocess.TimeoutExpired as e:
         raise KernelError(f"sentinel-dsp timed out after {_KERNEL_TIMEOUT_S}s "
                           f"on {wav_path}") from e

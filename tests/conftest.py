@@ -12,19 +12,22 @@ Two things the suite needs that are not properties of this repo:
    (internal layout), then a sibling `iamf-sentinel/` (public clone layout);
    absent all three, the dependent modules skip cleanly.
 
-2. **A POSIX-shell gate.** Several unit tests stand in for the kernel / decoder
-   binaries with `#!/bin/sh` stubs. Windows cannot execute those, so the tests
-   that *run* a stub (as opposed to merely hashing one) are gated. See
-   `needs_posix_shell`.
+2. **Cross-platform tool stubs.** Several unit tests stand in for the kernel /
+   decoder binaries with fake executables. Before item 25 those were
+   `#!/bin/sh` scripts and the five tests that ran or discovered one were
+   skipped on Windows. `write_exec_stub` now emits a `.cmd` batch file there
+   instead — executable by `subprocess` and, because it carries an extension
+   in `%PATHEXT%`, discoverable by `shutil.which()` — so the same five tests
+   run on every CI leg. Callers must treat the RETURNED path as the stub's
+   identity: on Windows it is `name + ".cmd"`, not `name`.
 """
 
 from __future__ import annotations
 
 import os
+import stat
 import sys
 from pathlib import Path
-
-import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -60,23 +63,44 @@ for _p in ([str(_REPO_ROOT)] + ([str(OSS_SRC)] if OSS_SRC else [])):
 
 # --------------------------------------------------------------- platform
 
-#: Tests that *execute* a `#!/bin/sh` stub binary. Windows has no shebang
-#: handling, so such a stub raises WinError 193 rather than standing in for
-#: the real tool. Tests that only hash a stub, or only check discovery
-#: precedence, are not gated by this.
-needs_posix_shell = pytest.mark.skipif(
-    os.name == "nt",
-    reason="POSIX '#!/bin/sh' stub binaries are not executable on Windows",
-)
+IS_WINDOWS = os.name == "nt"
 
-#: Discovery tests that rely on `shutil.which()` finding an EXTENSIONLESS
-#: file. On Windows `which()` searches `name + ext` for each `%PATHEXT%`
-#: entry, so an extensionless stub is invisible to it — a difference in the
-#: platform's resolution rules, not in ours. The env-var branch of
-#: `dsp.kernel_path()` is not gated: it is `os.path.isfile` + `os.access`,
-#: both of which behave on Windows.
-needs_windows_pathext = pytest.mark.skipif(
-    os.name == "nt",
-    reason="shutil.which() resolves via %PATHEXT% on Windows; an "
-           "extensionless stub is not discoverable there",
-)
+
+def write_exec_stub(directory: Path, name: str, *, stdout: str | None = None,
+                    stderr: str | None = None, exit_code: int = 0) -> Path:
+    """Create a fake tool binary that runs AND discovers on POSIX and Windows.
+
+    POSIX gets an extensionless ``#!/bin/sh`` script (chmod +x); Windows gets
+    ``name + ".cmd"`` — batch files execute directly under ``subprocess`` and
+    the extension is what ``shutil.which()`` needs there (``%PATHEXT%``
+    resolution; an extensionless file is invisible to it). Item 25's whole
+    point: the platform difference lives HERE, not in per-test skip gates.
+
+    The ``.cmd`` body is written with explicit CRLF line endings (cmd.exe's
+    native form) and payloads must stay within characters cmd.exe echoes
+    literally — no parens, carets, percent signs, angle brackets or pipes.
+    ``>&2 echo`` (redirect first) avoids cmd's trailing-space-before-redirect
+    trap. Callers compare paths with ``os.path.samefile`` rather than string
+    equality: ``which()`` may report a different extension case than we wrote.
+    """
+    if IS_WINDOWS:
+        stub = directory / (name + ".cmd")
+        lines = ["@echo off"]
+        if stdout is not None:
+            lines.append(f"echo {stdout}")
+        if stderr is not None:
+            lines.append(f">&2 echo {stderr}")
+        lines += [f"exit /b {exit_code}", ""]
+        stub.write_text("\r\n".join(lines), encoding="ascii", newline="")
+    else:
+        stub = directory / name
+        lines = ["#!/bin/sh"]
+        if stdout is not None:
+            lines.append(f"echo '{stdout}'")
+        if stderr is not None:
+            lines.append(f"echo '{stderr}' >&2")
+        lines += [f"exit {exit_code}", ""]
+        stub.write_text("\n".join(lines), encoding="utf-8", newline="")
+        stub.chmod(stub.stat().st_mode
+                   | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return stub

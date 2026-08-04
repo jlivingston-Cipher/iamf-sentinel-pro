@@ -68,6 +68,9 @@ reproducibly; `oci/layer-scan.py` is the release-CI hygiene check.
   corpus + harness behind the `adm-compare` method
 - [`iamf-sentinel-mcp`](https://github.com/jlivingston-Cipher/iamf-sentinel-mcp) — MCP server
   exposing the validator and packager to agent runtimes
+- [`Inseglet`](https://github.com/inseglet-audio/inseglet) — authoring-side companion (a native
+  REAPER MCP extension); its BS.1770-4 bed-weight tables are pinned against this package's
+  conformance vectors as an independent second witness
 
 ## License
 

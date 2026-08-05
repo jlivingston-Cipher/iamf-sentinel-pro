@@ -11,12 +11,19 @@ truth:
   (descriptor-clean, PCM-scrambled) that even L2 cannot see from the bitstream alone.
 - **Source-referenced ADM fidelity QC** (`adm-compare`, S-33x) — compares an IAMF encode
   against its BW64/ADM master.
+- **Intent-conformance QC** (`intent-compare`, S-34x) — compares an authoring session's
+  **intent sidecar** against the delivered ADM BW64: bed roster, predicted objects, authored
+  trajectory, stem levels and gain automation, and (via EAR isolation renders) the rendered
+  dominant speaker. This is the class that is structurally valid, loudness-conformant, and
+  still not what the session authored — the dropped object, the frozen position, the lost
+  gain move. The roster, trajectory and level legs need no EAR; the isolation legs do, and
+  the tool refuses rather than silently comparing less.
 - **Platform profile packs** (e.g. YouTube ingest) with the loudness-measurement calibration
   that keeps *correct* files from being flagged at tight tolerances.
 
 The core discovers this package by import (see `PLUGIN_SEAM.md`): its presence enables
-`sentinel validate --l3`, `diff --render`, `adm-compare`, and the profile packs in
-`sentinel_pro/profiles/`.
+`sentinel validate --l3`, `diff --render`, `adm-compare`, `intent-compare`, and the profile
+packs in `sentinel_pro/profiles/`.
 
 > **Free software, Apache-2.0.**
 

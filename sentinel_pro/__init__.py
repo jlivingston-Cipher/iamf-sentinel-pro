@@ -9,8 +9,14 @@ reference path (``iamf-sentinel-pro[numpy]``); adm-compare and ``diff
 --render`` always need numpy. L3/adm-compare additionally need the reference
 toolchain (decoder_main / iamfdec) and, for adm-compare, EAR (ear-render).
 
+Intent-conformance QC (S-34x, ``sentinel intent-compare``) compares an
+authoring session's intent sidecar against the delivered ADM BW64 — the class
+that is structurally valid, loudness-conformant, and still not what the session
+authored. Its per-object isolation legs need EAR (``ear-render``); the roster,
+trajectory and level legs do not.
+
 The core discovers this package by import (see PLUGIN_SEAM.md): its presence
-enables ``--l3``, ``diff --render``, ``adm-compare``, and the profile packs in
-``sentinel_pro/profiles/``.
+enables ``--l3``, ``diff --render``, ``adm-compare``, ``intent-compare``, and
+the profile packs in ``sentinel_pro/profiles/``.
 """
-__version__ = "0.3.3"
+__version__ = "0.3.4"

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "iamf-sentinel-pro"
-version = "0.3.3"
+version = "0.3.4"
 description = "Pro plugin for iamf-sentinel: L3 rendered QC (decoder oracles + BS.1770-4), ADM source-referenced fidelity QC, platform profile packs"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -15,7 +15,12 @@ authors = [{ name = "The iamf-sentinel authors" }]
 # install (sentinel-dsp binary on $PATH) runs `validate --l3` with no scientific
 # stack. The [numpy] extra restores the Python reference backend, adm-compare,
 # and diff --render.
-dependencies = ["iamf-sentinel>=0.3.0"]
+# The floor is 0.3.3, not the historical 0.3.0, and it is LOAD-BEARING:
+# intent_compare resolves the S-340..S-346 CheckSpec rows out of the core
+# registry (sentinel.findings.spec, a bare REGISTRY[id]), and those rows first
+# ship in core 0.3.3. Against core 0.3.2 every S-34x lookup raises KeyError —
+# measured, with a positive control on a pre-existing check (doc 127).
+dependencies = ["iamf-sentinel>=0.3.3"]
 
 [project.optional-dependencies]
 # scipy: adm-compare's alignment cross-correlation (doc 31). Anything that

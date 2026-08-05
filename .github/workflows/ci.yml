@@ -59,5 +59,12 @@ jobs:
       # tests skip cleanly in this environment; zero failures is the gate.
       # Item 29 (doc 108): CPython's own detector for the doc-98 locale-encoding
       # class — any default-encoding read/write/subprocess-decode fails the leg.
+      # doc 128: the sibling checkout above is now LOAD-BEARING, not assumed.
+      # Without it tests/test_l3_layout_units.py and
+      # tests/test_oracle_units.py skip at MODULE level, 17 tests are never
+      # collected, and the suite still exits 0 — a green leg that ran a
+      # third of these units. This flag makes that state a hard error.
       - run: python -X warn_default_encoding -W error::EncodingWarning -m pytest tests -q
         working-directory: iamf-sentinel-pro
+        env:
+          IAMF_SENTINEL_REQUIRE_FULL_COLLECTION: "1"

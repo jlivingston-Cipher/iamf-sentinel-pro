@@ -20,6 +20,26 @@ Two things the suite needs that are not properties of this repo:
    in `%PATHEXT%`, discoverable by `shutil.which()` — so the same five tests
    run on every CI leg. Callers must treat the RETURNED path as the stub's
    identity: on Windows it is `name + ".cmd"`, not `name`.
+
+3. **A guard against silently collecting less.** Point 1's clean skip is right
+   for a contributor who cloned this repo alone, and wrong for CI. When
+   `OSS_SRC` is None the two dependent modules skip at *module* level, so 17
+   tests collapse into 2 skip lines and the suite still exits 0 — 62 passed /
+   20 skipped instead of 79 / 18, all green (doc 127 §4, measured doc 128).
+   `ci.yml` supplies the sibling checkout, but nothing enforced that it had:
+   remove, rename or silently fail that step and every leg goes on reporting
+   success while a third of these units never run. Setting
+   `IAMF_SENTINEL_REQUIRE_FULL_COLLECTION=1` — which `ci.yml` now does — turns
+   the absent checkout into a hard error. The check lives in
+   `pytest_configure`, which runs *before* any test module is imported, so it
+   covers every future module that depends on `OSS_SRC` and not merely the two
+   that exist today.
+
+   Do not replace this with a count assertion. Counts are not a reliable
+   statement about the environment here: `test_packaging.py` resolves the
+   distribution through `importlib.metadata`, which finds a stale
+   `iamf_sentinel_pro.egg-info/` left in the working tree by any earlier build
+   and reports 80/17 with nothing installed at all (measured doc 128).
 """
 
 from __future__ import annotations
@@ -28,6 +48,8 @@ import os
 import stat
 import sys
 from pathlib import Path
+
+import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -59,6 +81,48 @@ NO_OSS_SRC_REASON = (
 for _p in ([str(_REPO_ROOT)] + ([str(OSS_SRC)] if OSS_SRC else [])):
     if _p not in sys.path:
         sys.path.insert(0, _p)
+
+
+# ------------------------------------------------- collection-completeness
+
+REQUIRE_FULL_COLLECTION_ENV = "IAMF_SENTINEL_REQUIRE_FULL_COLLECTION"
+
+_FALSEY = {"", "0", "false", "no", "off"}
+
+
+def require_full_collection(environ=None) -> bool:
+    """True when the caller has demanded a fully-collected run (see §3 above).
+
+    Split out from the hook so the policy is testable without a subprocess.
+    """
+    env = os.environ if environ is None else environ
+    return env.get(REQUIRE_FULL_COLLECTION_ENV, "").strip().lower() not in _FALSEY
+
+
+INCOMPLETE_COLLECTION_ERROR = (
+    "{var}=1 demands a fully-collected run, but the iamf-sentinel SOURCE "
+    "checkout was not found.\n"
+    "  Effect: tests/test_l3_layout_units.py and tests/test_oracle_units.py "
+    "skip at MODULE level, so 17 tests are never collected and the suite "
+    "would still exit 0.\n"
+    "  Fix: clone iamf-sentinel beside this repo (CI does this with a second "
+    "actions/checkout step), or set $IAMF_SENTINEL_SRC to a source checkout "
+    "that carries fixtures/build.py.\n"
+    "  If you are a contributor running this repo standalone, unset {var} "
+    "and the two modules will skip cleanly as designed."
+).format(var=REQUIRE_FULL_COLLECTION_ENV)
+
+
+def pytest_configure(config):                     # noqa: ARG001
+    """Refuse the collapsed-collection run when the caller asked for a full one.
+
+    Deliberately a `pytest_configure` hook and not a module-level raise: this
+    runs before any test module is imported, so the two `allow_module_level`
+    skips below are unreachable in the guarded state and a NEW module that
+    forgets the guard is covered by construction.
+    """
+    if require_full_collection() and OSS_SRC is None:
+        raise pytest.UsageError(INCOMPLETE_COLLECTION_ERROR)
 
 
 # --------------------------------------------------------------- platform

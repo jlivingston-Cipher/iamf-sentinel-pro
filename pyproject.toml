@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]   # PEP 639 SPDX license strings (item 27)
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -9,7 +9,9 @@ description = "Pro plugin for iamf-sentinel: L3 rendered QC (decoder oracles + B
 readme = "README.md"
 requires-python = ">=3.11"
 keywords = ["iamf", "immersive-audio", "loudness", "bs1770", "adm", "qc"]
-license = { text = "Apache-2.0" }          # A′ (doc 48): the whole stack is Apache-2.0; the seam is architecture, not a license boundary
+# A′ (doc 48): the whole stack is Apache-2.0; the seam is architecture, not a license boundary
+license = "Apache-2.0"                     # PEP 639 SPDX string (item 27)
+license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "The iamf-sentinel authors" }]
 # numpy moved to an extra by the ADR-6b backend switch (doc 35): a kernel-backed
 # install (sentinel-dsp binary on $PATH) runs `validate --l3` with no scientific
@@ -21,6 +23,12 @@ authors = [{ name = "The iamf-sentinel authors" }]
 # ship in core 0.3.3. Against core 0.3.2 every S-34x lookup raises KeyError —
 # measured, with a positive control on a pre-existing check (doc 127).
 dependencies = ["iamf-sentinel>=0.3.3"]
+
+[project.urls]
+Homepage        = "https://github.com/jlivingston-Cipher/iamf-sentinel-pro"
+Repository      = "https://github.com/jlivingston-Cipher/iamf-sentinel-pro"
+Issues          = "https://github.com/jlivingston-Cipher/iamf-sentinel-pro/issues"
+"IAMF Sentinel" = "https://github.com/jlivingston-Cipher/iamf-sentinel"
 
 [project.optional-dependencies]
 # scipy: adm-compare's alignment cross-correlation (doc 31). Anything that

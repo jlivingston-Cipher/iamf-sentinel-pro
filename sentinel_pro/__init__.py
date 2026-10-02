@@ -19,4 +19,4 @@ The core discovers this package by import (see PLUGIN_SEAM.md): its presence
 enables ``--l3``, ``diff --render``, ``adm-compare``, ``intent-compare``, and
 the profile packs in ``sentinel_pro/profiles/``.
 """
-__version__ = "0.3.4"
+__version__ = "0.3.5"

@@ -59,7 +59,7 @@ RUN cmake -S /src/sentinel-dsp -B /build -DCMAKE_BUILD_TYPE=Release \
 #       Pin verification (in-image decode round-trip) required before tagging;
 #       the script's S8 now does one (encode, decode with both oracles, refuse
 #       a silent result), and .github/workflows/toolchain.yml runs the script
-#       in debian:bookworm on every change to it.
+#       in debian:trixie on every change to it.
 #   (b) import (doc 38, executed — the default): COPY a pruned, validated
 #       host build via a named context — build with
 #         docker build -f oci/Dockerfile \

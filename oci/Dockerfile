@@ -43,19 +43,23 @@ RUN cmake -S /src/sentinel-dsp -B /build -DCMAKE_BUILD_TYPE=Release \
     && cmake --build /build -j
 
 # ---- Stage 2: pinned toolchain --------------------------------------------
-# The reference oracles (decoder_main @ iamf-tools 93597f1, iamfdec @ libiamf
-# v1.1.0, ffmpeg n8.1.2) built exactly as wp3-scripts/build_toolchain.sh +
-# toolchain-addendum.sh produce them (docs 10/15). Two sanctioned
+# The reference oracles (decoder_main @ iamf-tools v4.0.0, iamfdec @ libiamf
+# v2.0.1, ffmpeg n8.1.3 -- the Mac's toolchain, IA-0072) built by
+# oci/toolchain-build.sh; iamf-tools by its own build_cmake.sh (until IA-0072:
+# 93597f1 / v1.1.0 / n8.1.2 through our CMake port, docs 10/15). Two sanctioned
 # realizations, selected by TOOLCHAIN_REALIZATION (docs 36→38→39):
 #   (a) source (doc 39, executed — release CI, self-contained): stage
-#       `toolchain-source` runs oci/toolchain-build.sh (S0–S7 + addendum +
-#       prune, ≈25–45 min) against the pins above; the lib/ bundle is the ldd
+#       `toolchain-source` runs oci/toolchain-build.sh (S0–S8 + prune,
+#       ≈25–45 min) against the pins above; the lib/ bundle is the ldd
 #       closure of the three binaries minus the glibc-family allowlist (rule
 #       in the script) — no `tc` context needed:
 #         docker build -f oci/Dockerfile \
 #           --build-context oss=../sentinel-oss \
 #           --build-arg TOOLCHAIN_REALIZATION=source .
-#       Pin verification (in-image decode round-trip) required before tagging.
+#       Pin verification (in-image decode round-trip) required before tagging;
+#       the script's S8 now does one (encode, decode with both oracles, refuse
+#       a silent result), and .github/workflows/toolchain.yml runs the script
+#       in debian:bookworm on every change to it.
 #   (b) import (doc 38, executed — the default): COPY a pruned, validated
 #       host build via a named context — build with
 #         docker build -f oci/Dockerfile \
@@ -80,14 +84,11 @@ COPY --from=tc . /opt/iamf-toolchain
 
 FROM debian:bookworm-slim AS toolchain-source
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      git ca-certificates cmake make g++ nasm pkg-config zlib1g-dev \
+      git ca-certificates curl cmake make g++ nasm pkg-config zlib1g-dev \
       libopus-dev libflac-dev libexpat1-dev libeigen3-dev \
-    && { apt-get install -y --no-install-recommends libfdk-aac-dev \
-         || echo "note: libfdk-aac-dev unavailable (script falls back to source pin)"; } \
     && rm -rf /var/lib/apt/lists/*
 COPY oci/toolchain-build.sh /usr/local/bin/toolchain-build.sh
-COPY oci/port/CMakeLists.txt /opt/port/CMakeLists.txt
-RUN PORT_CMAKE=/opt/port/CMakeLists.txt TCB_SKIP_APT=1 \
+RUN TCB_SKIP_APT=1 \
     bash /usr/local/bin/toolchain-build.sh /opt/iamf-toolchain /tmp/tc-build \
     && rm -rf /tmp/tc-build
 

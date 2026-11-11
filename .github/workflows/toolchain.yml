@@ -1,0 +1,63 @@
+# The reference-oracle toolchain, built from source the way the image's
+# `toolchain-source` stage builds it, then Pro's suite run against it.
+#
+# Why this exists (IA-0072, 2026-11-11). oci/toolchain-build.sh is realization
+# (a) of oci/Dockerfile's stage 2, and until now no machine ran it after an
+# edit: the pins it carried (iamf-tools 93597f1, libiamf v1.1.0) were two
+# releases behind the Mac's toolchain. This job runs the script verbatim in
+# debian:bookworm -- the base of that stage -- whenever the script or this file
+# changes, so a pin move is proved on Linux before it is relied on.
+#
+# What it proves: the script's own S8 encodes iamf-tools' LPCM and Opus test
+# vectors and decodes them with decoder_main and iamfdec, refusing a silent
+# result; then Pro's suite runs with SENTINEL_TOOLCHAIN pointing at the
+# assembled root, so the oracle-gated tests (test_oracle_units, test_l3*)
+# run against these binaries instead of skipping. It does NOT build the
+# image (no docker here) or prove the runtime stage.
+name: toolchain
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - oci/toolchain-build.sh
+      - .github/workflows/toolchain.yml
+  pull_request:
+    paths:
+      - oci/toolchain-build.sh
+      - .github/workflows/toolchain.yml
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    container: debian:bookworm
+    timeout-minutes: 120
+    steps:
+      - name: git for checkout
+        run: apt-get update && apt-get install -y --no-install-recommends git ca-certificates
+      - uses: actions/checkout@v4
+        with:
+          path: iamf-sentinel-pro
+      - uses: actions/checkout@v4
+        with:
+          repository: jlivingston-Cipher/iamf-sentinel
+          path: iamf-sentinel
+      - name: build the toolchain (oci/toolchain-build.sh, as in the image)
+        run: bash iamf-sentinel-pro/oci/toolchain-build.sh /opt/iamf-toolchain /tmp/tc-build
+      - name: keep the build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: toolchain-build-logs
+          path: /tmp/tc-build/build-logs
+          if-no-files-found: ignore
+      - name: Pro's suite against the toolchain
+        working-directory: iamf-sentinel-pro
+        env:
+          SENTINEL_TOOLCHAIN: /opt/iamf-toolchain
+          IAMF_SENTINEL_REQUIRE_FULL_COLLECTION: "1"
+        run: |
+          apt-get install -y --no-install-recommends python3 python3-venv
+          python3 -m venv /opt/venv
+          /opt/venv/bin/python -m pip install -q -e ".[test]"
+          /opt/venv/bin/python -X warn_default_encoding -W error::EncodingWarning \
+            -m pytest tests -q -rs

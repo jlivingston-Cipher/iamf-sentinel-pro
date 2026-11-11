@@ -48,7 +48,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: toolchain-build-logs
-          path: /tmp/tc-build/build-logs
+          path: |
+            /tmp/tc-build/build-logs
+            /tmp/tc-build/it/logs
           if-no-files-found: ignore
       - name: Pro's suite against the toolchain
         working-directory: iamf-sentinel-pro

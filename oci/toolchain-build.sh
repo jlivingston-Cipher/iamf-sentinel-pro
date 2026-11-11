@@ -114,8 +114,14 @@ pinned FFmpeg "$FFMPEG_SHA"
 # It clones and builds abseil and protobuf, makes the header shims, and builds
 # encoder_main / decoder_main / probe_main into $WORK/it/src/build-iamf.
 stage s2-iamf-tools
-JOBS=$JOBS bash "$SRC/iamf-tools/build_cmake.sh" "$WORK/it" > "$LOG/iamf-tools.log" 2>&1 \
-  || fail iamf-tools-build_cmake "$LOG/iamf-tools.log"
+if ! JOBS=$JOBS bash "$SRC/iamf-tools/build_cmake.sh" "$WORK/it" > "$LOG/iamf-tools.log" 2>&1; then
+  # build_cmake.sh keeps its own logs; carry the failing one's errors here
+  echo "compiler: $(c++ --version | head -1)"
+  for l in "$WORK"/it/logs/*.log; do
+    grep -q -iE '(error|failed)' "$l" && { echo "--- errors in $(basename "$l") ---"; grep -m 20 -iE -B2 -A3 ' error|error:' "$l"; }
+  done
+  fail iamf-tools-build_cmake "$LOG/iamf-tools.log"
+fi
 IT=$WORK/it/src/build-iamf
 for t in encoder_main decoder_main probe_main; do
   [ -x "$IT/$t" ] || fail "missing-$t" "$LOG/iamf-tools.log"

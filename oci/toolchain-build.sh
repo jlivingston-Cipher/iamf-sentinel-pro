@@ -82,6 +82,14 @@ if ! ver_ge "${CMV:-0}" 3.28; then
   export PATH="$WORK/$t/bin:$PATH"
 fi
 echo "cmake: $(cmake --version | head -1)"
+# iamf-tools v4.0.0 needs GCC >= 13 (or clang): GCC 12.2 (Debian bookworm) refuses
+# iamf/cli/channel_label.cc (ambiguous absl::NoDestructor brace-init). Say so here,
+# not twelve minutes into the build.
+if c++ --version 2>/dev/null | head -1 | grep -q 'GCC\|g++'; then
+  GV=$(c++ -dumpversion | cut -d. -f1)
+  [ "${GV:-0}" -ge 13 ] || fail "g++ $GV is too old for iamf-tools $IAMF_TOOLS_TAG (needs >= 13; use debian:trixie or newer)"
+fi
+echo "compiler: $(c++ --version | head -1)"
 
 # ---------- S1: clones, each checked against its pinned commit ----------
 stage s1-clones

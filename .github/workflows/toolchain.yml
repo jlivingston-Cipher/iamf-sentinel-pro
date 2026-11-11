@@ -5,7 +5,7 @@
 # (a) of oci/Dockerfile's stage 2, and until now no machine ran it after an
 # edit: the pins it carried (iamf-tools 93597f1, libiamf v1.1.0) were two
 # releases behind the Mac's toolchain. This job runs the script verbatim in
-# debian:bookworm -- the base of that stage -- whenever the script or this file
+# debian:trixie -- the base of that stage -- whenever the script or this file
 # changes, so a pin move is proved on Linux before it is relied on.
 #
 # What it proves: the script's own S8 encodes iamf-tools' LPCM and Opus test
@@ -29,7 +29,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    container: debian:bookworm
+    container: debian:trixie
     timeout-minutes: 120
     steps:
       - name: git for checkout

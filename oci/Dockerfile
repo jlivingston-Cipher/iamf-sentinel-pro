@@ -82,7 +82,11 @@ RUN cmake -S /src/sentinel-dsp -B /build -DCMAKE_BUILD_TYPE=Release \
 FROM debian:bookworm-slim AS toolchain-import
 COPY --from=tc . /opt/iamf-toolchain
 
-FROM debian:bookworm-slim AS toolchain-source
+# trixie, not bookworm (IA-0072): the runtime stage's python:3.11-slim IS Debian trixie
+# (same digest as 3.11-slim-trixie, read 2026-11-11), so the oracles are now built against the
+# glibc they run on; and bookworm's GCC 12.2 cannot compile iamf-tools v4.0.0 (an ambiguous
+# absl::NoDestructor brace-init in iamf/cli/channel_label.cc; toolchain.yml run 43120145811).
+FROM debian:trixie-slim AS toolchain-source
 RUN apt-get update && apt-get install -y --no-install-recommends \
       git ca-certificates curl cmake make g++ nasm pkg-config zlib1g-dev \
       libopus-dev libflac-dev libexpat1-dev libeigen3-dev \

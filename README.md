@@ -10,7 +10,10 @@ truth:
 - **Channel identity on decoded PCM** — catches the pure essence-misroute corruption
   (descriptor-clean, PCM-scrambled) that even L2 cannot see from the bitstream alone.
 - **Source-referenced ADM fidelity QC** (`adm-compare`, S-33x) — compares an IAMF encode
-  against its BW64/ADM master.
+  against its BW64/ADM master. Two of its checks judge every static bed channel and object
+  on its own — S-333 its level, S-334 its direction, calibrated to BS.2127 rather than to
+  any converter — straight from the LPCM an ADM import writes (`--conversion-only` runs
+  them without a renderer or decoder).
 - **Intent-conformance QC** (`intent-compare`, S-34x) — compares an authoring session's
   **intent sidecar** against the delivered ADM BW64: bed roster, predicted objects, authored
   trajectory, stem levels and gain automation, and (via EAR isolation renders) the rendered
@@ -62,7 +65,7 @@ executable semantics (shell stubs, `PATH` resolution of extensionless files). No
 claimed for a platform that does not have a green leg.
 
 L3 and adm-compare additionally need the reference toolchain (decoder_main / iamfdec) and,
-for adm-compare, EAR (`ear-render`). The OCI recipes under `oci/` package the toolchain
+for adm-compare, EAR (`ear-render`); `adm-compare --conversion-only` needs neither. The OCI recipes under `oci/` package the toolchain
 reproducibly; `oci/layer-scan.py` is the release-CI hygiene check.
 
 ## Related projects

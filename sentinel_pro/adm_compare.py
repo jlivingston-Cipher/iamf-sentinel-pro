@@ -15,6 +15,12 @@ Checks (S-33x family, registered in findings.py):
     S-330  authored gain trajectory not realized (F18/F16 class)     FAIL
     S-331  importance filtering ineffective (F17 class)              FAIL
     S-332  source-vs-output level divergence (generic guard)         WARN
+    S-333  a track's level changed by the conversion (adm_conversion) FAIL
+    S-334  a track's direction changed by the conversion             FAIL
+
+S-333/S-334 run first and need neither EAR nor the decoder: they read the
+LPCM that iamf-tools' ADM import writes (sentinel_pro.adm_conversion).
+`conversion_only=True` runs them alone.
 
 The importance reference is built without ADM surgery: the "filtered" source is
 the same BW64 with the below-threshold audioObjects' tracks *silenced* (chna
@@ -280,8 +286,22 @@ def compare(source_adm: str, output_iamf: str, *, layout: str = "5.1",
             importance_threshold: int | None = None,
             toolchain: Toolchain | None = None,
             ear_bin: str | None = None,
-            workdir: str | None = None) -> ADMCompareResult:
+            workdir: str | None = None,
+            conversion_only: bool = False) -> ADMCompareResult:
     res = ADMCompareResult(source=source_adm, output=output_iamf, layout=layout)
+    # S-333 / S-334 -- per-track conversion fidelity, reference-free (IA-0076)
+    try:
+        from .adm_conversion import conversion_fidelity
+        conv_findings, conv_metrics = conversion_fidelity(source_adm, output_iamf)
+        res.findings.extend(conv_findings)
+        res.metrics["conversion"] = conv_metrics
+    except Exception as e:  # CI contract: never crash
+        res.metrics["conversion"] = {"error": f"{type(e).__name__}: {e}"}
+        if conversion_only:
+            res.execution_error = f"conversion check failed: {type(e).__name__}: {e}"
+            return res
+    if conversion_only:
+        return res
     ear_bin = ear_bin or find_ear()
     if ear_bin is None:
         res.execution_error = "ear-render not found (set $SENTINEL_EAR)"

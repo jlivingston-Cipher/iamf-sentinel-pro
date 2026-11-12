@@ -12,7 +12,8 @@ truth:
 - **Source-referenced ADM fidelity QC** (`adm-compare`, S-33x) — compares an IAMF encode
   against its BW64/ADM master. Two of its checks judge every static bed channel and object
   on its own — S-333 its level, S-334 its direction, calibrated to BS.2127 rather than to
-  any converter — straight from the LPCM an ADM import writes (`--conversion-only` runs
+  any converter (a Cartesian position passes on either the §10.1.2 reading or plain
+  trigonometry, as BS.2127's own renderer takes both) — straight from the LPCM an ADM import writes (`--conversion-only` runs
   them without a renderer or decoder).
 - **Intent-conformance QC** (`intent-compare`, S-34x) — compares an authoring session's
   **intent sidecar** against the delivered ADM BW64: bed roster, predicted objects, authored

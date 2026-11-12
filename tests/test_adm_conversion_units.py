@@ -174,7 +174,7 @@ def _sh1(az: float, el: float) -> np.ndarray:      # SN3D ACN 0..3: W, Y, Z, X
 
 
 def write_iamf(path, src: np.ndarray, rule: str, codec: str = "ipcm", noise: float = 0.0,
-               fault_db: dict | None = None) -> None:
+               fault_db: dict | None = None, fault_az: dict | None = None) -> None:
     """One first-order scene element (substreams 0-3) and one mono channel
     element (substream 4) for the LFE, LPCM 24-bit, from `src` by `rule`."""
     scene = np.zeros((N, 4))
@@ -194,6 +194,7 @@ def write_iamf(path, src: np.ndarray, rule: str, codec: str = "ipcm", noise: flo
         if is_lfe and rule == "standard":
             lfe += gain * s
             continue
+        az = (fault_az or {}).get(name, lambda a: a)(az)
         scene += np.outer(g * s, _sh1(az, el))
     if noise:      # independent of every source: what a codec leaves behind
         rng = np.random.Generator(np.random.PCG64(4108))
@@ -221,9 +222,10 @@ def pair(tmp_path):
     src = _sources()
     adm = tmp_path / "master.wav"
     write_adm(str(adm), src)
-    def make(rule, codec="ipcm", noise=0.0, fault_db=None):
-        p = tmp_path / f"{rule}-{codec}-{noise}-{sorted((fault_db or {}).items())}.iamf"
-        write_iamf(str(p), src, rule, codec, noise, fault_db)
+    def make(rule, codec="ipcm", noise=0.0, fault_db=None, fault_az=None):
+        p = tmp_path / (f"{rule}-{codec}-{noise}-{sorted((fault_db or {}).items())}-"
+                        f"{sorted(fault_az or {})}.iamf")
+        write_iamf(str(p), src, rule, codec, noise, fault_db, fault_az)
         return str(adm), str(p)
     return make
 
@@ -247,19 +249,26 @@ def test_a_conversion_to_the_standard_passes(pair):
     assert t["Obj_Moving"]["not_judged"].startswith("2 blocks")
 
 
-def test_the_converters_rule_fires_both_checks_at_the_measured_values(pair):
+def test_the_converters_rule_fires_the_level_check_and_its_direction_is_the_plain_reading(pair):
+    # IA-0113 (ruled Either): the converter's plain-trig corner (-45) is 15 deg from
+    # 10.1.2's -30 and passes on the plain reading; its level fault still fails.
     findings, m = conversion_fidelity(*pair("converter"))
     ids = sorted(f.check_id for f in findings)
-    assert ids == ["S-333", "S-334"], ids
+    assert ids == ["S-333"], ids
     t = _by_name(m)
     assert t["Obj_Corner"]["level_error_db"] == pytest.approx(-3.01, abs=0.01)
     assert t["RoomCentricLFE"]["level_error_db"] == pytest.approx(-4.77, abs=0.01)
     assert t["RoomCentricLFE"]["lands_in"] == "scene 300"
     assert t["Obj_Front"]["level_error_db"] == pytest.approx(0.0, abs=0.01)
     assert t["Obj_Polar"]["level_error_db"] == pytest.approx(0.0, abs=0.01)
-    assert t["Obj_Corner"]["direction_error_deg"] == pytest.approx(15.0, abs=0.1)
+    assert t["Obj_Corner"]["direction_error_deg"] < 0.1
+    assert t["Obj_Corner"]["direction_reading"] == "plain-trig"
+    assert t["Obj_Corner"]["direction_error_other_deg"] == pytest.approx(15.0, abs=0.1)
+    assert t["Obj_Corner"]["direction_call"] == "pass"
     assert t["Obj_Corner"]["realised_az_el"][0] == pytest.approx(-45.0, abs=0.1)
     assert t["Obj_Front"]["direction_error_deg"] < 0.1
+    assert t["Obj_Polar"]["direction_reading"] == "authored"
+    assert m["cartesian_readings"]["plain-trig"] >= 1
     s333 = next(f for f in findings if f.check_id == "S-333")
     assert "RoomCentricLFE" in s333.message and "-4.77" in s333.message
 
@@ -281,10 +290,43 @@ def test_compare_conversion_only_needs_no_renderer(pair, monkeypatch):
     monkeypatch.setenv("PATH", "")
     res = compare(*pair("converter"), conversion_only=True)
     assert res.execution_error is None
-    assert {f.check_id for f in res.findings} == {"S-333", "S-334"}
+    assert {f.check_id for f in res.findings} == {"S-333"}
     assert res.exit_code() == 1
     res2 = compare(*pair("standard"), conversion_only=True)
     assert res2.findings == [] and res2.exit_code() == 0
+
+
+# ------------------------------------------- a Cartesian block passes on either reading (IA-0113)
+
+def test_the_standard_reading_passes_and_says_so(pair):
+    findings, m = conversion_fidelity(*pair("standard"))
+    t = _by_name(m)["Obj_Corner"]
+    assert findings == [] and t["direction_reading"] == "bs2127-10.1.2"
+    assert t["direction_error_other_deg"] == pytest.approx(15.0, abs=0.1)
+    assert m["cartesian_readings"] == {"bs2127-10.1.2": 2, "plain-trig": 0}
+
+
+@pytest.mark.parametrize("rule", ["standard", "converter"])
+@pytest.mark.parametrize("fault,label", [
+    (lambda a: -a, "mirrored"),          # left for right: -30/-45 lands at +30/+45
+    (lambda a: a + 25.0, "rotated 25"),  # a wrong channel order's kind of error
+])
+def test_a_direction_on_neither_reading_fails(pair, rule, fault, label):
+    findings, m = conversion_fidelity(*pair(rule, fault_az={"Obj_Corner": fault}))
+    t = _by_name(m)["Obj_Corner"]
+    assert t["direction_call"] == "fail", (label, t)
+    assert t["direction_error_deg"] >= 5.0 and t["direction_error_other_deg"] >= 5.0
+    s334 = [f for f in findings if f.check_id == "S-334"]
+    assert len(s334) == 1 and s334[0].severity == Severity.FAIL
+    assert "Obj_Corner" in s334[0].message and "either" in s334[0].expected
+
+
+def test_the_plain_reading_is_iamf_tools_panner():
+    from sentinel_pro.adm_conversion import point_cart_to_polar_plain
+    for xyz in ((1, 1, 0), (-1, 0, 0), (0, -1, 0), (0.3, 0.8, 0.5), (-1, 1, 1)):
+        assert point_cart_to_polar_plain(*xyz) == pytest.approx(_cart_polar_az(*xyz))
+    assert point_cart_to_polar_plain(-1, 0, 0) == pytest.approx((90.0, 0.0))
+    assert point_cart_to_polar(-1, 0, 0)[0] == pytest.approx(70.0)
 
 
 # ------------------------------------------------- each reading's margin of error (IA-0108)

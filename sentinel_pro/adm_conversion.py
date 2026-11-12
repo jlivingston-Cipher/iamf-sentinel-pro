@@ -16,9 +16,18 @@ built to the converter's own rule would certify its faults.
   level      a static block arrives at block gain x audioObject gain,
              wherever it sits. BS.2127 has no distance-to-level term, and
              OAR 1.0.0 §4.1.3/§4.2.3 renders an object at any distance alike.
-  direction  the authored azimuth/elevation for a polar block; for a
-             Cartesian block, BS.2127-0 §10.1.2 point_cart_to_polar (the
-             cube corner (1, 1, 0) is azimuth -30, not -45).
+  direction  the authored azimuth/elevation for a polar block. A Cartesian
+             block has two defensible readings and passes within tolerance of
+             either, the track saying which it matched (IA-0113, ruled
+             2026-11-11): BS.2127-0 §10.1.2 point_cart_to_polar (the cube
+             corner (1, 1, 0) is azimuth -30, the left-wall centre 70) and
+             plain trigonometry (-45, 90), which iamf-tools' panner realises.
+             BS.2127's own renderer takes the plain reading on 7.1.4 and the
+             10.1.2 one on 5.1 (gain_calc, allocentric), so the standard gives
+             no single answer; on the v4.0.0 corpus every direction failure
+             against 10.1.2 alone (124 of 156) sat within 2 deg of the plain
+             reading and none on neither. A fault - a collapse, a mirror, a
+             wrong channel order - lands on neither and still fails.
 Readout. In a scene-based element (SN3D, ACN) a point source at unit gain
 puts exactly its signal on ACN 0 from any direction, so the coefficient on
 W is the track's gain, and ACN 1/2/3 (Y, Z, X) give its direction. In a
@@ -145,6 +154,13 @@ def point_cart_to_polar(x: float, y: float, z: float) -> tuple[float, float, flo
     return phi, th_c * THETA_TOP / THETA_TOP_C, r_xy
 
 
+def point_cart_to_polar_plain(x: float, y: float, z: float) -> tuple[float, float]:
+    """The plain trigonometric reading of a BS.2076 Cartesian position (X right,
+    Y front, Z up; azimuth positive to the left), as iamf-tools' panner takes it."""
+    return (-math.degrees(math.atan2(x, y)),
+            math.degrees(math.atan2(z, math.hypot(x, y))))
+
+
 def _unit(az: float, el: float) -> np.ndarray:
     a, e = math.radians(az), math.radians(el)
     return np.array([math.cos(a) * math.cos(e), math.sin(a) * math.cos(e), math.sin(e)])
@@ -168,6 +184,7 @@ class SourceTrack:
     gain: float = 1.0               # block gain x object gain, linear
     polar: tuple[float, float] | None = None       # expected (az, el)
     cart: tuple[float, float, float] | None = None
+    polar_plain: tuple[float, float] | None = None  # Cartesian only: the plain reading
     is_lfe: bool = False
     not_judged: str | None = None
 
@@ -295,6 +312,7 @@ def parse_tracks(chna: bytes, axml: bytes) -> list[SourceTrack]:
                 st.cart = (pos.get("X", 0.0), pos.get("Y", 0.0), pos.get("Z", 0.0))
                 az, el, _d = point_cart_to_polar(*st.cart)
                 st.polar = (az, el)
+                st.polar_plain = point_cart_to_polar_plain(*st.cart)
             elif "azimuth" in pos:
                 st.polar = (pos["azimuth"], pos.get("elevation", 0.0))
             elif st.not_judged is None and not st.is_lfe:
@@ -432,6 +450,8 @@ class TrackResult:
     direction_se_deg: float | None = None
     level_call: str | None = None          # "pass" | "fail" | "undetermined"
     direction_call: str | None = None
+    direction_reading: str | None = None    # "authored" | "bs2127-10.1.2" | "plain-trig"
+    direction_error_other_deg: float | None = None   # Cartesian: error to the reading not matched
 
     def to_dict(self) -> dict:
         r = lambda v, k=2: None if v is None else round(v, k)   # noqa: E731
@@ -445,7 +465,9 @@ class TrackResult:
                 "lands_in": self.lands_in, "not_judged": self.not_judged,
                 "level_se_db": r(self.level_se_db, 3),
                 "direction_se_deg": r(self.direction_se_deg, 2),
-                "level_call": self.level_call, "direction_call": self.direction_call}
+                "level_call": self.level_call, "direction_call": self.direction_call,
+                "direction_reading": self.direction_reading,
+                "direction_error_other_deg": r(self.direction_error_other_deg, 1)}
 
 
 def call(error: float, se: float | None, tol: float) -> str:
@@ -598,9 +620,22 @@ def conversion_fidelity(source_adm: str, output_iamf: str) -> tuple[list[Finding
         r.realised_gain_db = level
         r.level_error_db = r.realised_gain_db - r.expected_gain_db
         if direction is not None:
-            r.expected_dir = t.polar
             r.realised_dir = direction
-            r.direction_error_deg = angle_between(*r.expected_dir, *r.realised_dir)
+            r.expected_dir = t.polar
+            r.direction_error_deg = angle_between(*t.polar, *direction)
+            r.direction_reading = "bs2127-10.1.2" if t.cart is not None else "authored"
+            if t.polar_plain is not None:            # Cartesian: either reading (IA-0113)
+                e_plain = angle_between(*t.polar_plain, *direction)
+                if e_plain < r.direction_error_deg:
+                    r.direction_error_other_deg = r.direction_error_deg
+                    r.expected_dir, r.direction_error_deg = t.polar_plain, e_plain
+                    r.direction_reading = "plain-trig"
+                else:
+                    r.direction_error_other_deg = e_plain
+                if t.not_judged is None:
+                    cr = metrics.setdefault("cartesian_readings",
+                                            {"bs2127-10.1.2": 0, "plain-trig": 0})
+                    cr[r.direction_reading] += 1
         r.level_se_db = _level_se(A[k], G[k, k], sigma2, spans)
         if block_A:
             lv, dv = [], []
@@ -648,7 +683,8 @@ def conversion_fidelity(source_adm: str, output_iamf: str) -> tuple[list[Finding
             f"{DIRECTION_TOL_DEG} deg)",
             where=", ".join(f"{r.name} {r.direction_error_deg:.1f} deg" for r in dir_bad[:8]),
             expected=f"{worst.name} at az {worst.expected_dir[0]:.1f}, el "
-                     f"{worst.expected_dir[1]:.1f} (BS.2127-0 §10.1.2 for Cartesian blocks)",
+                     f"{worst.expected_dir[1]:.1f} ({worst.direction_reading} reading; a "
+                     "Cartesian block passes on either BS.2127-0 §10.1.2 or plain trigonometry)",
             found=f"az {worst.realised_dir[0]:.1f}, el {worst.realised_dir[1]:.1f}"))
     for cid, close, attr, se_attr, tol, unit in (
             ("S-333", level_close, "level_error_db", "level_se_db", LEVEL_TOL_DB, "dB"),

@@ -53,6 +53,21 @@ from .adm_compare import _find_chunks, _read_wav
 # 3.01 dB / 13.1 deg. Both FAIL, as S-330.
 LEVEL_TOL_DB = 1.0        # S-333: |realised - expected| level of any judged track
 DIRECTION_TOL_DEG = 5.0   # S-334: great-circle error of any judged track
+# Each reading's margin of error (IA-0108). Two estimates, the larger kept:
+# the solve's own (the residual's variance per coded channel x (S'S)^-1,
+# carried to dB through the level's formula), which is exact for a white
+# residual; and batch means -- the window cut into SE_BLOCKS equal blocks,
+# each solved alone, the spread of the per-block readings over
+# sqrt(SE_BLOCKS) -- which stays honest when the residual is coloured (codec
+# noise is). Directions use batch means. A reading past its line by more than
+# CALL_K standard errors fails, one
+# inside it by more than CALL_K passes, and one in between is UNDETERMINED
+# (reported at INFO), never guessed. On uncompressed content the residual is
+# quantisation alone, the error is ~0, and the calls are the ones above.
+# CALL_K is provisional until ruled (D128).
+SE_BLOCKS = 16
+SE_MIN_BLOCK_S = 0.05     # blocks shorter than this: no margin is estimated
+CALL_K = 2.0
 MAX_SECONDS = 20.0        # the solve uses at most this much audio
 SILENT_RMS = 1e-5         # a source track quieter than this is not judged
 COND_LIMIT = 1e6          # source tracks this collinear cannot be separated
@@ -413,6 +428,10 @@ class TrackResult:
     direction_error_deg: float | None = None
     lands_in: str = ""
     not_judged: str | None = None
+    level_se_db: float | None = None
+    direction_se_deg: float | None = None
+    level_call: str | None = None          # "pass" | "fail" | "undetermined"
+    direction_call: str | None = None
 
     def to_dict(self) -> dict:
         r = lambda v, k=2: None if v is None else round(v, k)   # noqa: E731
@@ -423,7 +442,66 @@ class TrackResult:
                 "expected_az_el": None if self.expected_dir is None else [r(v, 1) for v in self.expected_dir],
                 "realised_az_el": None if self.realised_dir is None else [r(v, 1) for v in self.realised_dir],
                 "direction_error_deg": r(self.direction_error_deg, 1),
-                "lands_in": self.lands_in, "not_judged": self.not_judged}
+                "lands_in": self.lands_in, "not_judged": self.not_judged,
+                "level_se_db": r(self.level_se_db, 3),
+                "direction_se_deg": r(self.direction_se_deg, 2),
+                "level_call": self.level_call, "direction_call": self.direction_call}
+
+
+def call(error: float, se: float | None, tol: float) -> str:
+    """'fail' when |error| is past `tol` by more than CALL_K standard errors,
+    'pass' when inside it by more than that, else 'undetermined'."""
+    m = CALL_K * (se or 0.0)
+    if abs(error) - m >= tol:
+        return "fail"
+    if abs(error) + m < tol:
+        return "pass"
+    return "undetermined"
+
+
+def _level_se(a: np.ndarray, g_kk: float, sigma2: np.ndarray, spans) -> float | None:
+    """The level reading's standard error from the solve: Var(a_c) =
+    sigma_c^2 x (S'S)^-1_kk on each coefficient the level sums, through
+    level = 10 log10(sum a_c^2) (the coded channels' residuals independent)."""
+    cols = []
+    for e, lo, hi in spans:
+        if e.kind == "scene":
+            if 0 in e.acn:
+                cols.append(lo + e.acn.index(0))
+        else:
+            cols.extend(range(lo, hi))
+    energy = float(sum(a[c] ** 2 for c in cols))
+    if energy <= 0:
+        return None
+    var_e = float(sum((2 * a[c]) ** 2 * sigma2[c] * g_kk for c in cols))
+    return (10.0 / math.log(10.0)) * math.sqrt(var_e) / energy
+
+
+def _reading(a: np.ndarray, spans, is_lfe: bool, judge_dir: bool):
+    """(level, direction|None, where) from one track's row of coefficients."""
+    energy, w, where = 0.0, None, []
+    for e, lo, hi in spans:
+        if e.kind == "scene":
+            if 0 in e.acn:
+                w_e = a[lo + e.acn.index(0)]
+                if abs(w_e) > 1e-4:
+                    w = (e, lo, w_e)
+                    where.append(f"scene {e.element_id}")
+                energy += w_e ** 2
+        else:
+            eg = float((a[lo:hi] ** 2).sum())
+            if eg > 1e-8:
+                where.append(f"channels {e.element_id}")
+            energy += eg
+    direction = None
+    if w is not None and not is_lfe and judge_dir:
+        e, lo, w_e = w
+        comp = {acn: a[lo + i] for i, acn in enumerate(e.acn)}
+        if all(k in comp for k in (1, 2, 3)):
+            yv, zv, xv = comp[1] / w_e, comp[2] / w_e, comp[3] / w_e
+            direction = (math.degrees(math.atan2(yv, xv)),
+                         math.degrees(math.atan2(zv, math.hypot(xv, yv))))
+    return _db(math.sqrt(energy)), direction, where
 
 
 def _db(v: float) -> float:
@@ -491,48 +569,63 @@ def conversion_fidelity(source_adm: str, output_iamf: str) -> tuple[list[Finding
         spans.append((e, c0, c0 + e.channels.shape[1]))
         c0 += e.channels.shape[1]
     row = {c: i for i, c in enumerate(cols)}
-    level_bad, dir_bad = [], []
+    level_bad, dir_bad, level_close, dir_close = [], [], [], []
+    # batch means for the margin of error (SE_BLOCKS blocks, each solved alone)
+    block_A = []
+    L = n // SE_BLOCKS
+    if L >= SE_MIN_BLOCK_S * rate:
+        for b in range(SE_BLOCKS):
+            Sb = S[b * L:(b + 1) * L]
+            if float(np.linalg.cond(Sb)) > COND_LIMIT:
+                block_A = []
+                break
+            Ab, *_ = np.linalg.lstsq(Sb, y[b * L:(b + 1) * L], rcond=None)
+            block_A.append(Ab)
+    metrics.update({"se_blocks": len(block_A), "call_k": CALL_K})
+    G = np.linalg.inv(S.T @ S)
+    sigma2 = (resid ** 2).sum(axis=0) / max(n - S.shape[1], 1)       # per coded channel
     for t in tracks:
         r = TrackResult(t.track, t.name or t.uid)
         if t.track - 1 not in row:
             r.not_judged = t.not_judged or "silent or outside the data chunk"
             metrics["tracks"].append(r.to_dict())
             continue
-        a = A[row[t.track - 1]]
-        energy = 0.0
-        w = None
-        where = []
-        for e, lo, hi in spans:
-            if e.kind == "scene":
-                if 0 in e.acn:
-                    w_e = a[lo + e.acn.index(0)]
-                    if abs(w_e) > 1e-4:
-                        w = (e, lo, w_e)
-                        where.append(f"scene {e.element_id}")
-                    energy += w_e ** 2
-            else:
-                eg = float((a[lo:hi] ** 2).sum())
-                if eg > 1e-8:
-                    where.append(f"channels {e.element_id}")
-                energy += eg
+        k = row[t.track - 1]
+        level, direction, where = _reading(A[k], spans, t.is_lfe, t.polar is not None)
         r.lands_in = ", ".join(where) or "nowhere"
         r.not_judged = t.not_judged
         r.expected_gain_db = _db(t.gain)
-        r.realised_gain_db = _db(math.sqrt(energy))
+        r.realised_gain_db = level
         r.level_error_db = r.realised_gain_db - r.expected_gain_db
-        if t.not_judged is None and abs(r.level_error_db) >= LEVEL_TOL_DB:
-            level_bad.append(r)
-        if w is not None and not t.is_lfe and t.polar is not None:
-            e, lo, w_e = w
-            comp = {acn: a[lo + i] for i, acn in enumerate(e.acn)}
-            if all(k in comp for k in (1, 2, 3)):
-                yv, zv, xv = comp[1] / w_e, comp[2] / w_e, comp[3] / w_e
-                r.expected_dir = t.polar
-                r.realised_dir = (math.degrees(math.atan2(yv, xv)),
-                                  math.degrees(math.atan2(zv, math.hypot(xv, yv))))
-                r.direction_error_deg = angle_between(*r.expected_dir, *r.realised_dir)
-                if t.not_judged is None and r.direction_error_deg >= DIRECTION_TOL_DEG:
+        if direction is not None:
+            r.expected_dir = t.polar
+            r.realised_dir = direction
+            r.direction_error_deg = angle_between(*r.expected_dir, *r.realised_dir)
+        r.level_se_db = _level_se(A[k], G[k, k], sigma2, spans)
+        if block_A:
+            lv, dv = [], []
+            for Ab in block_A:
+                bl, bd, _w = _reading(Ab[k], spans, t.is_lfe, t.polar is not None)
+                lv.append(bl)
+                if bd is not None and direction is not None:
+                    dv.append(angle_between(*direction, *bd))
+            r.level_se_db = max(r.level_se_db or 0.0,
+                                float(np.std(lv, ddof=1)) / math.sqrt(len(lv)))
+            if direction is not None and len(dv) == len(lv):
+                r.direction_se_deg = math.sqrt(float(np.mean(np.square(dv)))) / math.sqrt(len(dv))
+        if t.not_judged is None:
+            r.level_call = call(r.level_error_db, r.level_se_db, LEVEL_TOL_DB)
+            if r.level_call == "fail":
+                level_bad.append(r)
+            elif r.level_call == "undetermined":
+                level_close.append(r)
+            if r.direction_error_deg is not None:
+                r.direction_call = call(r.direction_error_deg, r.direction_se_deg,
+                                        DIRECTION_TOL_DEG)
+                if r.direction_call == "fail":
                     dir_bad.append(r)
+                elif r.direction_call == "undetermined":
+                    dir_close.append(r)
         metrics["tracks"].append(r.to_dict())
     findings: list[Finding] = []
     if level_bad:
@@ -557,10 +650,27 @@ def conversion_fidelity(source_adm: str, output_iamf: str) -> tuple[list[Finding
             expected=f"{worst.name} at az {worst.expected_dir[0]:.1f}, el "
                      f"{worst.expected_dir[1]:.1f} (BS.2127-0 §10.1.2 for Cartesian blocks)",
             found=f"az {worst.realised_dir[0]:.1f}, el {worst.realised_dir[1]:.1f}"))
+    for cid, close, attr, se_attr, tol, unit in (
+            ("S-333", level_close, "level_error_db", "level_se_db", LEVEL_TOL_DB, "dB"),
+            ("S-334", dir_close, "direction_error_deg", "direction_se_deg",
+             DIRECTION_TOL_DEG, "deg")):
+        if close:
+            worst = max(close, key=lambda r: abs(getattr(r, attr)))
+            findings.append(_mk(
+                cid,
+                f"{len(close)} source track(s) too close to the {tol} {unit} line to call "
+                f"(worst {worst.name}: {getattr(worst, attr):+.2f} +/- "
+                f"{CALL_K:g} x {getattr(worst, se_attr):.2f} {unit}) -- undetermined, "
+                "not a pass",
+                severity=Severity.INFO,
+                where=", ".join(f"{r.name} {getattr(r, attr):+.2f}+/-{getattr(r, se_attr):.2f}"
+                                for r in close[:8]),
+                expected=f"clear of the {tol} {unit} line by {CALL_K:g} standard errors",
+                found=f"{worst.name} {getattr(worst, attr):+.2f} {unit}"))
     return findings, metrics
 
 
-def _mk(check_id: str, message: str, **kw) -> Finding:
+def _mk(check_id: str, message: str, severity: Severity | None = None, **kw) -> Finding:
     s = spec(check_id)
-    return Finding(check_id=check_id, severity=s.default_severity,
+    return Finding(check_id=check_id, severity=s.default_severity if severity is None else severity,
                    message=message, f_refs=s.f_refs, **kw)

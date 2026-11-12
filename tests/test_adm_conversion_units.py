@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from fixtures.build import (ChannelLayerSpec, ElementSpec, Writer, build,  # noqa: E402
                             obu, scene_spec)
 from sentinel_pro.adm_compare import compare                          # noqa: E402
+from sentinel.findings import Severity                                # noqa: E402
 from sentinel_pro.adm_conversion import (angle_between,              # noqa: E402
                                          conversion_fidelity,
                                          inside_angle_range,
@@ -172,13 +173,14 @@ def _sh1(az: float, el: float) -> np.ndarray:      # SN3D ACN 0..3: W, Y, Z, X
     return np.array([1.0, math.sin(a) * math.cos(e), math.sin(e), math.cos(a) * math.cos(e)])
 
 
-def write_iamf(path, src: np.ndarray, rule: str, codec: str = "ipcm") -> None:
+def write_iamf(path, src: np.ndarray, rule: str, codec: str = "ipcm", noise: float = 0.0,
+               fault_db: dict | None = None) -> None:
     """One first-order scene element (substreams 0-3) and one mono channel
     element (substream 4) for the LFE, LPCM 24-bit, from `src` by `rule`."""
     scene = np.zeros((N, 4))
     lfe = np.zeros(N)
     for k, (name, td, pos, gain, is_lfe, nblocks) in enumerate(TRACKS):
-        s = src[:, k]
+        s = src[:, k] * 10 ** ((fault_db or {}).get(name, 0.0) / 20)
         if pos[0] == "cart":
             x, y, z = pos[1:]
             if rule == "standard":
@@ -193,6 +195,11 @@ def write_iamf(path, src: np.ndarray, rule: str, codec: str = "ipcm") -> None:
             lfe += gain * s
             continue
         scene += np.outer(g * s, _sh1(az, el))
+    if noise:      # independent of every source: what a codec leaves behind
+        rng = np.random.Generator(np.random.PCG64(4108))
+        scene = scene + noise * rng.standard_normal(scene.shape)
+        lfe = lfe + noise * rng.standard_normal(lfe.shape)
+    assert np.max(np.abs(scene)) < 1.0 and np.max(np.abs(lfe)) < 1.0      # no clipping
     spec = scene_spec(1)
     spec.codec_id = codec
     spec.num_samples_per_frame = 480
@@ -214,9 +221,9 @@ def pair(tmp_path):
     src = _sources()
     adm = tmp_path / "master.wav"
     write_adm(str(adm), src)
-    def make(rule, codec="ipcm"):
-        p = tmp_path / f"{rule}-{codec}.iamf"
-        write_iamf(str(p), src, rule, codec)
+    def make(rule, codec="ipcm", noise=0.0, fault_db=None):
+        p = tmp_path / f"{rule}-{codec}-{noise}-{sorted((fault_db or {}).items())}.iamf"
+        write_iamf(str(p), src, rule, codec, noise, fault_db)
         return str(adm), str(p)
     return make
 
@@ -278,3 +285,57 @@ def test_compare_conversion_only_needs_no_renderer(pair, monkeypatch):
     assert res.exit_code() == 1
     res2 = compare(*pair("standard"), conversion_only=True)
     assert res2.findings == [] and res2.exit_code() == 0
+
+
+# ------------------------------------------------- each reading's margin of error (IA-0108)
+
+def test_exact_content_has_no_margin_and_the_calls_are_unchanged(pair):
+    findings, m = conversion_fidelity(*pair("standard"))
+    assert m["se_blocks"] == 16 and findings == []
+    for t in m["tracks"]:
+        if t["level_call"] is not None:
+            assert t["level_se_db"] < 1e-3 and t["level_call"] == "pass", t
+    findings, m = conversion_fidelity(*pair("converter"))
+    assert _by_name(m)["Obj_Corner"]["level_call"] == "fail"
+    assert all(f.severity == Severity.FAIL for f in findings)
+
+
+def test_noise_gives_a_margin_and_a_reading_on_the_line_is_undetermined(pair):
+    # The same 1.0 dB fault: exact content fails it (on the line, |e| >= tol);
+    # with codec-like noise the reading is 1.0 +/- a margin and is not called.
+    findings, m = conversion_fidelity(*pair("standard", noise=0.08, fault_db={"Obj_Front": -1.0}))
+    t = _by_name(m)["Obj_Front"]
+    assert 0.005 < t["level_se_db"] < 0.1, t
+    assert t["level_call"] == "undetermined", t
+    s333 = [f for f in findings if f.check_id == "S-333"]
+    assert len(s333) == 1 and s333[0].severity == Severity.INFO
+    assert "undetermined" in s333[0].message and "Obj_Front" in s333[0].message
+    # well clear of the line either way, the noise does not change the call
+    findings, m = conversion_fidelity(*pair("standard", noise=0.08, fault_db={"Obj_Front": -1.6}))
+    assert _by_name(m)["Obj_Front"]["level_call"] == "fail"
+    assert any(f.check_id == "S-333" and f.severity == Severity.FAIL for f in findings)
+    findings, m = conversion_fidelity(*pair("standard", noise=0.08))
+    assert _by_name(m)["Obj_Front"]["level_call"] == "pass"
+    assert [f for f in findings if f.severity != Severity.INFO] == []
+
+
+def test_noise_gives_directions_a_margin_too(pair):
+    findings, m = conversion_fidelity(*pair("standard", noise=0.08))
+    for name in ("Obj_Front", "Obj_Corner", "Obj_Polar"):
+        t = _by_name(m)[name]
+        assert t["direction_se_deg"] > 0 and t["direction_call"] == "pass", t
+
+
+def test_an_undetermined_reading_does_not_fail_adm_compare(pair):
+    res = compare(*pair("standard", noise=0.08, fault_db={"Obj_Front": -1.0}), conversion_only=True)
+    assert [f.severity for f in res.findings] == [Severity.INFO]
+    assert res.exit_code() == 0
+
+
+def test_call_is_symmetric_and_k_wide():
+    from sentinel_pro.adm_conversion import CALL_K, call
+    assert call(1.5, 0.0, 1.0) == "fail" and call(0.99, 0.0, 1.0) == "pass"
+    assert call(1.0, 0.0, 1.0) == "fail"                      # on the line, exact: >= tol
+    assert call(-1.0 - 2 * CALL_K * 0.1, 0.1, 1.0) == "fail"
+    assert call(1.0 - CALL_K * 0.1 + 1e-9, 0.1, 1.0) == "undetermined"
+    assert call(1.0 - CALL_K * 0.1 - 1e-9, 0.1, 1.0) == "pass"

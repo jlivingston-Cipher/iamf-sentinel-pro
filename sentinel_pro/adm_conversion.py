@@ -184,7 +184,15 @@ def read_source(path: str) -> list[SourceTrack]:
     if b"chna" not in ch or b"axml" not in ch:
         raise ValueError("source has no chna/axml chunk -- not an ADM BW64")
     off, size = ch[b"chna"]
-    body = data[off:off + size]
+    chna = data[off:off + size]
+    off, size = ch[b"axml"]
+    return parse_tracks(chna, data[off:off + size])
+
+
+def parse_tracks(chna: bytes, axml: bytes) -> list[SourceTrack]:
+    """The tracks an ADM master's chna and axml describe (read_source's body,
+    split out so a caller that has the two chunks need not read the audio)."""
+    body = chna
     n_uids = struct.unpack("<H", body[2:4])[0]
     entries = []
     for i in range(n_uids):
@@ -197,8 +205,7 @@ def read_source(path: str) -> list[SourceTrack]:
         uid = e[2:14].decode("ascii", "replace").strip("\x00 ")
         tref = e[14:28].decode("ascii", "replace").strip("\x00 ")
         entries.append((tn, uid, tref))
-    off, size = ch[b"axml"]
-    root = ET.fromstring(data[off:off + size].decode("utf-8", "replace"))
+    root = ET.fromstring(axml.decode("utf-8", "replace"))
     by_tag: dict[str, dict[str, object]] = {}
     for el in root.iter():
         t = _ln(el.tag)

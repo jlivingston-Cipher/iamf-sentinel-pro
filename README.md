@@ -21,6 +21,13 @@ truth:
   still not what the session authored — the dropped object, the frozen position, the lost
   gain move. The roster, trajectory and level legs need no EAR; the isolation legs do, and
   the tool refuses rather than silently comparing less.
+- **ADM delivery measurements** (`sentinel_pro.adm_delivery`, S-522..S-525, S-533) — what the
+  core's `sentinel adm-check` cannot judge from metadata, measured from the master's audio in one
+  pass: the LFE low-pass against a stated filter shape (drawn as a spectrum in the HTML report),
+  silent and near-silent channels, whether a 96 kHz master holds content above 24 kHz without a
+  brick-wall edge at the 48 kHz band edge, and, given the stereo master, the offset and extra
+  tail found by cross-correlating a fold-down against it (and an album's gapless boundaries).
+  Thresholds that are not the specification's own numbers are named in each row and provisional.
 - **Platform profile packs** (e.g. YouTube ingest) with the loudness-measurement calibration
   that keeps *correct* files from being flagged at tight tolerances.
 
@@ -40,8 +47,8 @@ pip install "iamf-sentinel-pro[numpy]"   # adds the numpy reference backend (quo
 ```
 
 Measurement runs on the compiled **`sentinel-dsp`** kernel when the binary is present
-(`$SENTINEL_DSP` explicit path, else `$PATH`; `SENTINEL_DSP=off` forces the reference
-path) or on the numpy reference implementation. A present-but-broken kernel is an
+(`$SENTINEL_DSP` explicit path, else `bin/sentinel-dsp` under the toolchain root, else
+`$PATH`; `SENTINEL_DSP=off` forces the reference path) or on the numpy reference implementation. A present-but-broken kernel is an
 **execution error**, never a silent fallback. `adm-compare` and `diff --render` always
 need the `[numpy]` extra.
 

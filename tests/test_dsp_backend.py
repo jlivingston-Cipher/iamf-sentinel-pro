@@ -35,6 +35,11 @@ def _find_kernel():
     env = os.environ.get("SENTINEL_DSP", "")
     if env and env.strip().lower() not in ("0", "off") and os.path.isfile(env):
         return env
+    tc = os.environ.get("SENTINEL_TOOLCHAIN")
+    if tc:
+        found = shutil.which("sentinel-dsp", path=os.path.join(tc, "bin"))
+        if found:
+            return found
     return shutil.which("sentinel-dsp")
 
 
@@ -99,6 +104,7 @@ def test_discovery_path_fallback(monkeypatch, tmp_path):
     # `which()` must still resolve the bare name (item 25).
     stub = write_exec_stub(tmp_path, "sentinel-dsp")
     monkeypatch.delenv("SENTINEL_DSP", raising=False)
+    monkeypatch.delenv("SENTINEL_TOOLCHAIN", raising=False)
     monkeypatch.setenv("PATH", str(tmp_path))
     found = dsp.kernel_path()
     assert found is not None and os.path.samefile(found, stub)
@@ -121,8 +127,90 @@ def test_exec_stub_selfcheck(tmp_path):
 
 def test_discovery_absent_means_python(monkeypatch, tmp_path):
     monkeypatch.delenv("SENTINEL_DSP", raising=False)
+    monkeypatch.delenv("SENTINEL_TOOLCHAIN", raising=False)
     monkeypatch.setenv("PATH", str(tmp_path))          # empty dir
     assert dsp.kernel_path() is None
+
+
+def _root_with_kernel(base, name="root"):
+    """A toolchain root holding bin/sentinel-dsp (a stub)."""
+    binr = base / name / "bin"
+    binr.mkdir(parents=True)
+    return base / name, write_exec_stub(binr, "sentinel-dsp")
+
+
+def test_discovery_toolchain_root_before_path(monkeypatch, tmp_path):
+    """IA-0074: the kernel sits in the toolchain root (bin/sentinel-dsp), where
+    the recipes install it; a root the caller resolved wins over $PATH, as in
+    iamf-loom's own lookup. Before, only $SENTINEL_DSP and $PATH were read and
+    the gate measured with the numpy reference beside a built kernel."""
+    root, in_root = _root_with_kernel(tmp_path)
+    on_path_dir = tmp_path / "pathdir"
+    on_path_dir.mkdir()
+    write_exec_stub(on_path_dir, "sentinel-dsp")
+    monkeypatch.delenv("SENTINEL_DSP", raising=False)
+    monkeypatch.delenv("SENTINEL_TOOLCHAIN", raising=False)
+    monkeypatch.setenv("PATH", str(on_path_dir))
+    found = dsp.kernel_path([str(root)])
+    assert found is not None and os.path.samefile(found, in_root)
+    # without the root, PATH is still the fallback
+    found = dsp.kernel_path()
+    assert found is not None and not os.path.samefile(found, in_root)
+
+
+def test_discovery_env_toolchain_root(monkeypatch, tmp_path):
+    root, in_root = _root_with_kernel(tmp_path)
+    monkeypatch.delenv("SENTINEL_DSP", raising=False)
+    monkeypatch.setenv("SENTINEL_TOOLCHAIN", str(root))
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    found = dsp.kernel_path()
+    assert found is not None and os.path.samefile(found, in_root)
+
+
+def test_discovery_root_without_kernel_falls_through(monkeypatch, tmp_path):
+    (tmp_path / "bare" / "bin").mkdir(parents=True)
+    monkeypatch.delenv("SENTINEL_DSP", raising=False)
+    monkeypatch.delenv("SENTINEL_TOOLCHAIN", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    assert dsp.kernel_path([str(tmp_path / "bare")]) is None
+
+
+@pytest.mark.parametrize("val", ["off", None])
+def test_discovery_env_dsp_beats_root(monkeypatch, tmp_path, val):
+    """$SENTINEL_DSP still decides first: 'off' forces Python even with a
+    kernel in the root, and an explicit path wins over the root's."""
+    root, _ = _root_with_kernel(tmp_path)
+    if val is None:
+        other = tmp_path / "explicit"
+        other.mkdir()
+        explicit = write_exec_stub(other, "sentinel-dsp")
+        if not os.access(explicit, os.X_OK):
+            pytest.skip("explicit-path form needs an executable stub")
+        monkeypatch.setenv("SENTINEL_DSP", str(explicit))
+        assert os.path.samefile(dsp.kernel_path([str(root)]), explicit)
+    else:
+        monkeypatch.setenv("SENTINEL_DSP", val)
+        assert dsp.kernel_path([str(root)]) is None
+
+
+def test_toolchain_records_roots_and_analyze_uses_them(monkeypatch, tmp_path,
+                                                       stereo_wav):
+    """The wiring: Toolchain.discover keeps its roots, and analyze(roots=...)
+    reaches the root's kernel (a stub that fails, so the error names it)."""
+    from sentinel_pro.oracle import Toolchain
+    root = tmp_path / "tc"
+    (root / "bin").mkdir(parents=True)
+    write_exec_stub(root / "bin", "sentinel-dsp", stderr="rootkernel",
+                    exit_code=4)
+    monkeypatch.delenv("SENTINEL_DSP", raising=False)
+    monkeypatch.delenv("SENTINEL_TOOLCHAIN", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    tc = Toolchain.discover(str(root))
+    assert tc.roots == [str(root)]
+    with pytest.raises(dsp.KernelError, match="exited 4.*rootkernel"):
+        dsp.analyze(stereo_wav, layout="2.0", roots=tc.roots)
+    # and without the roots the same call takes the reference path
+    assert dsp.analyze(stereo_wav, layout="2.0")["backend"] == "python"
 
 
 # ---------------------------------------------------------------- contracts
@@ -142,6 +230,7 @@ def test_analyze_python_matches_reference(monkeypatch, stereo_wav):
 
 def test_forced_kernel_without_binary_raises(monkeypatch, stereo_wav, tmp_path):
     monkeypatch.delenv("SENTINEL_DSP", raising=False)
+    monkeypatch.delenv("SENTINEL_TOOLCHAIN", raising=False)
     monkeypatch.setenv("PATH", str(tmp_path))
     with pytest.raises(dsp.KernelError):
         dsp.analyze(stereo_wav, layout="2.0", backend="kernel")

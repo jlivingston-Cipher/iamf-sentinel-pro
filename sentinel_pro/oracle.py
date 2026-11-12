@@ -59,6 +59,10 @@ class Toolchain:
     iamfdec: str | None = None
     work_root: str | None = None
     _tmp: list[str] = field(default_factory=list)
+    # The toolchain roots discover() searched, in order. dsp.kernel_path()
+    # looks for bin/sentinel-dsp under them, so the L3 measurement uses the
+    # kernel the toolchain carries rather than only $SENTINEL_DSP / $PATH.
+    roots: list[str] = field(default_factory=list)
 
     @property
     def available(self) -> bool:
@@ -85,6 +89,7 @@ class Toolchain:
             candidates.append(env)
 
         tc = cls()
+        tc.roots = list(candidates)
         for c in candidates:
             dm = os.path.join(c, "src/build-iamf/decoder_main")
             if tc.decoder_main is None and os.access(dm, os.X_OK):

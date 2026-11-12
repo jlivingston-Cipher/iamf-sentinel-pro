@@ -99,7 +99,8 @@ def _measured(ctx: CheckContext, layout: str, decoder: str,
         # kernel subprocess when the sentinel-dsp binary is present, numpy
         # reference otherwise. The full analysis document replaces the old
         # cached PCM — the channel-identity heuristics read it instead.
-        a = dsp.analyze(dec.wav_path, layout=layout)
+        a = dsp.analyze(dec.wav_path, layout=layout,
+                        roots=getattr(ctx.toolchain, "roots", None))
         meas = {
             "sr": a["sample_rate"],
             "integrated": a["integrated_lufs"],

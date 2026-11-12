@@ -24,7 +24,8 @@ decoder oracles, DSP, and their dependencies live behind plugin discovery.
   profile packs, and the `sentinel-dsp` C++ kernel. The frozen detail is in the design
   record below.
 - **Measurement backend:** `sentinel_pro.dsp.analyze()` is the file-level facade; the
-  compiled kernel (`$SENTINEL_DSP` explicit path, else `$PATH`) or the numpy reference
+  compiled kernel (`$SENTINEL_DSP` explicit path, else the toolchain root's `bin/sentinel-dsp`,
+  else `$PATH`) or the numpy reference
   (`[numpy]` extra) computes the same document, gated by the differential suite.
 
 Everything below is the executed design record — kept intact, in order, as history.
@@ -137,7 +138,7 @@ passed, 0 skipped** with toolchain+samples+corpus+EAR; WASM native-vs-browser di
 A second seam now exists *inside* the Pro plugin: `sentinel_pro.dsp.analyze()` is the
 file-level measurement facade (one WAV in, one JSON-shaped document out — the ADR-4 boundary
 applied to our own kernel). When the compiled `sentinel-dsp` binary is present (`$SENTINEL_DSP`
-explicit path, else `$PATH`) measurement runs in the kernel subprocess; otherwise the numpy
+explicit path, else `bin/sentinel-dsp` under the toolchain root, else `$PATH`) measurement runs in the kernel subprocess; otherwise the numpy
 reference functions compute the same document. `SENTINEL_DSP=off` forces the reference path.
 
 Contract points (mirroring the doc-34 degradation philosophy):

@@ -23,10 +23,14 @@ from sentinel.findings import Severity                      # noqa: E402
 from sentinel.diff import diff_files                        # noqa: E402
 from sentinel.container.mp4 import parse_mp4                # noqa: E402
 
+# $SENTINEL_SAMPLES names the directory holding the archived sample trees (the
+# same variable iamf-sentinel and iamf-loom read), so they can live somewhere a
+# restart does not empty; unset, the historical /tmp/sentinel_build is used.
+_SAMPLES = os.environ.get("SENTINEL_SAMPLES") or "/tmp/sentinel_build"
 SAMPLE_ROOTS = [
-    "/tmp/sentinel_build/wp1/wp1-samples",
-    "/tmp/sentinel_build/wp3/wp3-samples",
-    "/tmp/sentinel_build/wp2-l3",          # Phase-2 regenerated fixtures (F4 pair)
+    os.path.join(_SAMPLES, "wp1", "wp1-samples"),
+    os.path.join(_SAMPLES, "wp3", "wp3-samples"),
+    os.path.join(_SAMPLES, "wp2-l3"),       # Phase-2 regenerated fixtures (F4 pair)
     os.path.join(os.path.dirname(__file__), "..", "samples-l3"),   # shipped copies
 ]
 
@@ -54,7 +58,8 @@ def sample(name: str) -> str:
         p = os.path.join(root, name)
         if os.path.exists(p):
             return p
-    pytest.skip(f"sample {name} not available")
+    pytest.skip(f"sample {name} not available under {_SAMPLES} "
+                "($SENTINEL_SAMPLES) or samples-l3/")
 
 
 def checks_fired(report):

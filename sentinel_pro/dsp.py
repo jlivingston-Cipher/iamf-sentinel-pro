@@ -403,13 +403,17 @@ class KernelError(RuntimeError):
 _KERNEL_TIMEOUT_S = 300         # generous: worst Phase-2 measurement was ~3.6 s
 
 
-def kernel_path() -> str | None:
+def kernel_path(roots: list[str] | None = None) -> str | None:
     """Resolve the sentinel-dsp binary, or None for the Python reference path.
 
     Order (doc 35 D-S2): $SENTINEL_DSP — 'off'/'0'/'' forces Python, any other
     value is an explicit binary path (missing → KernelError: an explicitly
     requested kernel that isn't there is an error, not a preference) — then
-    `sentinel-dsp` on $PATH.
+    `bin/sentinel-dsp` under each toolchain root in ``roots`` (the roots the
+    caller resolved, e.g. ``Toolchain.roots``) and under $SENTINEL_TOOLCHAIN,
+    which is where the toolchain recipes install it — then `sentinel-dsp` on
+    $PATH. Root before PATH is the order iamf-loom's own measure steps use, so
+    the kernel the gate measures with is the one the toolchain carries.
     """
     env = os.environ.get("SENTINEL_DSP")
     if env is not None:
@@ -418,6 +422,16 @@ def kernel_path() -> str | None:
         if not (os.path.isfile(env) and os.access(env, os.X_OK)):
             raise KernelError(f"$SENTINEL_DSP points to a non-executable path: {env}")
         return env
+    candidates = list(roots or [])
+    tenv = os.environ.get("SENTINEL_TOOLCHAIN")
+    if tenv:
+        candidates.append(tenv)
+    for root in candidates:
+        # which() confined to <root>/bin: the executable bit on POSIX,
+        # %PATHEXT% (.exe/.cmd) on Windows.
+        found = shutil.which("sentinel-dsp", path=os.path.join(root, "bin"))
+        if found:
+            return found
     return shutil.which("sentinel-dsp")
 
 
@@ -495,22 +509,24 @@ def _analyze_python(wav_path: str, layout: str | None,
 
 def analyze(wav_path: str, layout: str | None = None,
             weights: list[float] | None = None, variant: str = "primary",
-            win_s: float = 0.5, backend: str | None = None) -> dict:
+            win_s: float = 0.5, backend: str | None = None,
+            roots: list[str] | None = None) -> dict:
     """File-level measurement facade — the ADR-4 shape (one WAV in, one doc out).
 
     Returns the sentinel-dsp JSON document (doc 33) as a dict, plus
     ``backend`` ("kernel"|"python"). ``backend=None`` auto-selects via
-    `kernel_path()`; "python"/"kernel" force a path (forcing "kernel" with no
-    binary raises KernelError).
+    `kernel_path(roots)`; "python"/"kernel" force a path (forcing "kernel"
+    with no binary raises KernelError).
     """
     if backend not in (None, "python", "kernel"):
         raise ValueError(f"unknown backend {backend!r}")
     binary = None
     if backend != "python":
-        binary = kernel_path()
+        binary = kernel_path(roots)
         if backend == "kernel" and binary is None:
             raise KernelError("backend='kernel' requested but no sentinel-dsp "
-                              "binary found ($SENTINEL_DSP / $PATH)")
+                              "binary found ($SENTINEL_DSP / toolchain root "
+                              "bin/ / $PATH)")
     if binary is not None:
         return _analyze_kernel(binary, wav_path, layout, weights, variant, win_s)
     return _analyze_python(wav_path, layout, weights, variant, win_s)

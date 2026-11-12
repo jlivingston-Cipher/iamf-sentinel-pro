@@ -23,7 +23,9 @@ import sys
 ROOT = os.environ.get("SENTINEL_TOOLCHAIN", "/home/claude/iamf-wp1")
 FF = f"{ROOT}/bin/ffmpeg-install/bin/ffmpeg"
 ESSENCE = f"{ROOT}/essence/7dot1dot4_48k_24b.wav"
-OUT = sys.argv[1] if len(sys.argv) > 1 else "/tmp/sentinel_build/wp2-l3"
+OUT = (sys.argv[1] if len(sys.argv) > 1 else
+       os.path.join(os.environ.get("SENTINEL_SAMPLES") or "/tmp/sentinel_build",
+                    "wp2-l3"))
 
 # WAV order: L R C LFE Lss Rss Lrs Rrs Ltf Rtf Ltb Rtb
 CORRECT = [

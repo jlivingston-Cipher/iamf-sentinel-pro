@@ -47,8 +47,10 @@ from sentinel.parser import parse_bytes
 
 from .adm_compare import _find_chunks, _read_wav
 
-# Provisional thresholds -- the rulings are James's (D128); the readout on
-# conforming LPCM content is exact to 24-bit quantisation (0.00 dB, 0.0 deg).
+# Thresholds ruled 2026-11-11 (IA-0107, "ok for now"; the rulings are James's,
+# D128): kept as set from the measurements -- conforming LPCM content reads
+# exact to 24-bit quantisation (0.00 dB, 0.0 deg), the smallest real fault
+# 3.01 dB / 13.1 deg. Both FAIL, as S-330.
 LEVEL_TOL_DB = 1.0        # S-333: |realised - expected| level of any judged track
 DIRECTION_TOL_DEG = 5.0   # S-334: great-circle error of any judged track
 MAX_SECONDS = 20.0        # the solve uses at most this much audio
